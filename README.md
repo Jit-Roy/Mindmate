@@ -1,10 +1,10 @@
-# Mindmate - AI Mental Health Companion 🤗
+# MyBro - AI Mental Health Companion 🤗
 
 A compassionate AI chatbot designed to provide mental health support with genuine human-like responses. Built with Python, LangChain, and Google's Gemini API.
 
-## 🎯 **What Makes Mindmate Different?**
+## 🎯 **What Makes MyBro Different?**
 
-Unlike clinical chatbots that just ask questions, Mindmate responds like a **caring older brother** who:
+Unlike clinical chatbots that just ask questions, MyBro responds like a **caring older brother** who:
 - **Fights for you** when you're feeling down
 - **Challenges negative thoughts** with passion and protection
 - **Gives you reasons to live** instead of just listening passively
@@ -26,8 +26,8 @@ Unlike clinical chatbots that just ask questions, Mindmate responds like a **car
 
 ### **1. Clone the Repository**
 ```bash
-git clone https://github.com/Jit-Roy/Mindmate.git
-cd Mindmate
+git clone https://github.com/Jit-Roy/MyBro.git
+cd MyBro
 ```
 
 ### **2. Install Dependencies**
@@ -50,7 +50,7 @@ GEMINI_API_KEY=your_actual_gemini_api_key_here
 - Create a new API key
 - Copy it to your `.env` file
 
-### **5. Run Mindmate**
+### **5. Run MyBro**
 ```bash
 python main.py
 ```
@@ -64,7 +64,7 @@ python main.py
 > 
 > Bot: "How does that feeling make you feel? Can you tell me more about those thoughts?"
 
-**✅ Mindmate:**
+**✅ MyBro:**
 > User: "I just want to die"
 > 
 > Bot: "Whoa, hold up bro! I'm not letting you think like that. Your mom loves you more than her own life - you think she wants to lose her son? Listen to me - you're NOT a burden! Your family is stressed about money, but that doesn't mean they don't want you. This pain you're feeling right now? It's temporary, but the decision to end your life is permanent. You're stronger than this, and I'm here to remind you of that."
@@ -73,7 +73,7 @@ python main.py
 
 **User**: "My mom said I'm not who she deserved. I feel like such a burden."
 
-**Mindmate**: "Bro, that's her fear and stress talking, not her heart! You think she carried you for 9 months, raised you, sacrificed for you, just to not want you anymore? Hell no! 
+**MyBro**: "Bro, that's her fear and stress talking, not her heart! You think she carried you for 9 months, raised you, sacrificed for you, just to not want you anymore? Hell no! 
 
 Money problems make people say stupid things they don't mean. When parents are scared about finances, they lash out at the people closest to them - and that's usually their kids. It doesn't mean she doesn't love you.
 
@@ -89,26 +89,7 @@ What would happen to her if you weren't here? She'd be destroyed, bro. Absolutel
 - `clear` - Clear conversation history
 - `quit` or `exit` - End the conversation
 
-## 🏗️ **Project Structure**
-
-```
-Mindmate/
-├── main.py                    # Main chat interface with Rich UI
-├── chatbot.py                 # Core chatbot with human-like responses
-├── models.py                  # Pydantic data models
-├── memory_manager.py          # Conversation memory & user profiles
-├── mental_health_filter.py    # Topic filtering & emotion detection
-├── config.py                  # Configuration management
-├── setup.py                   # Setup & installation script
-├── demo.py                    # Feature demonstration (no API needed)
-├── test_chatbot.py           # Comprehensive test suite
-├── requirements.txt          # Python dependencies
-├── .env.example             # Environment variables template
-├── README.md               # This file
-└── QUICKSTART.md          # Quick setup guide
-```
-
-## 🧠 **How Mindmate Works**
+## 🧠 **How MyBro Works**
 
 ### **1. Human-like Conversation Engine**
 - Uses advanced system prompts to respond like a caring friend
@@ -143,7 +124,7 @@ Urgency Level 1: "I feel sad" (gets normal conversation)
 
 ## 🎯 **Core Philosophy**
 
-Mindmate believes that **most people need genuine human connection and support**, not immediate referrals to professionals. It acts like:
+MyBro believes that **most people need genuine human connection and support**, not immediate referrals to professionals. It acts like:
 
 - A **protective older brother** who won't let you give up
 - A **passionate friend** who fights against your depression
@@ -220,7 +201,7 @@ We welcome contributions! Areas for improvement:
 
 ## ⚠️ **Important Disclaimers**
 
-- **Not a Replacement for Professional Care**: Mindmate provides peer support, not medical treatment
+- **Not a Replacement for Professional Care**: MyBro provides peer support, not medical treatment
 - **Crisis Situations**: Always contact emergency services (911) or crisis helplines for immediate danger
 - **Privacy**: Conversations are stored locally; review data handling before deployment
 - **Limitations**: AI responses, while sophisticated, cannot replace human judgment
@@ -237,8 +218,8 @@ This project is open source and available under the [MIT License](LICENSE).
 
 ## 🙋 **Support**
 
-- **Issues**: [GitHub Issues](https://github.com/Jit-Roy/Mindmate/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/Jit-Roy/Mindmate/discussions)
+- **Issues**: [GitHub Issues](https://github.com/Jit-Roy/MyBro/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/Jit-Roy/MyBro/discussions)
 - **Email**: [Your contact email]
 
 ---
