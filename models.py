@@ -1,6 +1,18 @@
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, date
 from pydantic import BaseModel, Field
+
+
+class ImportantEvent(BaseModel):
+    """Tracks important upcoming events mentioned in conversation."""
+    event_id: str
+    user_id: str
+    event_type: str  # 'exam', 'interview', 'appointment', 'date', 'meeting', etc.
+    description: str  # What the user said about it
+    event_date: Optional[date] = None  # When it's happening
+    mentioned_date: datetime = Field(default_factory=datetime.now)  # When they mentioned it
+    follow_up_needed: bool = True
+    follow_up_done: bool = False
 
 
 class UserProfile(BaseModel):
@@ -11,6 +23,7 @@ class UserProfile(BaseModel):
     preferred_name: Optional[str] = None
     mental_health_concerns: List[str] = Field(default_factory=list)
     support_preferences: List[str] = Field(default_factory=list)
+    important_events: List[ImportantEvent] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=datetime.now)
     last_interaction: datetime = Field(default_factory=datetime.now)
 

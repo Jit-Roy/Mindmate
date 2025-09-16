@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import List, Optional
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
-from models import ChatResponse, ConversationMessage
+from models import ChatResponse, UserProfile, ConversationMessage, ImportantEvent
 from memory_manager import MemoryManager
 from mental_health_filter import MentalHealthFilter
 from config import config
@@ -119,6 +119,9 @@ Remember: You can be caring and supportive without being aggressive. Save the in
     async def chat(self, user_id: str, message: str) -> ChatResponse:
         """Main chat method that processes user input and generates response."""
         
+        # Check if we should generate a proactive greeting first
+        proactive_greeting = self._generate_proactive_greeting(user_id)
+        
         # Check if message is mental health related
         topic_filter = self.health_filter.is_mental_health_related(message)
         
@@ -138,6 +141,9 @@ Remember: You can be caring and supportive without being aggressive. Save the in
         
         # Detect emotion and urgency
         emotion, urgency_level = self.health_filter.detect_emotion(message)
+        
+        # Detect and store important events
+        self._detect_important_events(message, user_id)
         
         # Get conversation context BEFORE adding the current message
         context = self.memory_manager.get_conversation_context(user_id)
@@ -169,6 +175,8 @@ Remember: You can be caring and supportive without being aggressive. Save the in
 CONVERSATION CONTEXT:
 {context}
 
+{f"PROACTIVE GREETING: You should start your response with this caring follow-up: '{proactive_greeting}'" if proactive_greeting else ""}
+
 CURRENT USER STATE:
 - Detected emotion: {emotion}
 - Urgency level: {urgency_level}/5
@@ -193,7 +201,8 @@ Remember to:
 2. Reference relevant past conversations
 3. Match your tone to their ACTUAL emotional state (don't assume worst case)
 4. Only escalate intensity if urgency level is high
-5. Acknowledge time passed since last conversation if applicable"""
+5. Acknowledge time passed since last conversation if applicable
+6. If there's a proactive greeting above, start with that and then naturally flow into responding to their current message"""
         
         # Build message list for the LLM
         messages = [
@@ -210,6 +219,14 @@ Remember to:
             # Generate follow-up questions and suggestions
             follow_up_questions = self._generate_follow_up_questions(emotion, urgency_level, user_profile.preferred_name, user_id)
             suggestions = self._generate_suggestions(emotion, urgency_level)
+            
+            # If we used a proactive greeting, mark relevant events as followed up
+            if proactive_greeting:
+                # Extract event type from greeting to mark as followed up
+                for event_type in ['exam', 'interview', 'appointment']:
+                    if event_type in proactive_greeting.lower():
+                        self._mark_event_followed_up(user_id, event_type)
+                        break
             
             # Add user message to memory first
             self.memory_manager.add_message(
@@ -302,6 +319,124 @@ You can also:
                 langchain_messages.append(AIMessage(content=msg.content))
         
         return langchain_messages
+
+    def _detect_important_events(self, message: str, user_id: str) -> None:
+        """Detect and store important upcoming events from user messages."""
+        message_lower = message.lower()
+        
+        # Event patterns to detect
+        event_patterns = {
+            'exam': ['exam', 'test', 'quiz', 'midterm', 'final'],
+            'interview': ['interview', 'job interview', 'interview tomorrow'],
+            'appointment': ['appointment', 'doctor', 'therapy', 'meeting'],
+            'date': ['date', 'going out', 'date night'],
+            'presentation': ['presentation', 'presenting', 'speech'],
+            'deadline': ['deadline', 'due date', 'assignment due'],
+            'event': ['event', 'party', 'celebration', 'wedding']
+        }
+        
+        # Time indicators that suggest upcoming events
+        time_indicators = [
+            'tomorrow', 'next week', 'next month', 'in a few days', 
+            'this weekend', 'next monday', 'next tuesday', 'next wednesday',
+            'next thursday', 'next friday', 'next saturday', 'next sunday',
+            'tonight', 'later today', 'this afternoon', 'this evening'
+        ]
+        
+        # Check if message contains both event and time indicators
+        detected_event_type = None
+        for event_type, keywords in event_patterns.items():
+            if any(keyword in message_lower for keyword in keywords):
+                detected_event_type = event_type
+                break
+        
+        has_time_indicator = any(indicator in message_lower for indicator in time_indicators)
+        
+        # If we detect an event with time context, store it
+        if detected_event_type and has_time_indicator:
+            from datetime import date, timedelta
+            import uuid
+            
+            # Estimate event date based on time indicators
+            event_date = None
+            today = date.today()
+            
+            if 'tomorrow' in message_lower:
+                event_date = today + timedelta(days=1)
+            elif 'next week' in message_lower:
+                event_date = today + timedelta(days=7)
+            elif 'tonight' in message_lower or 'later today' in message_lower:
+                event_date = today
+            elif 'this weekend' in message_lower:
+                event_date = today + timedelta(days=(5 - today.weekday()))  # Next Saturday
+            
+            # Create and store the event
+            event = ImportantEvent(
+                event_id=str(uuid.uuid4()),
+                user_id=user_id,
+                event_type=detected_event_type,
+                description=message,
+                event_date=event_date
+            )
+            
+            # Add to user profile
+            user_profile = self.memory_manager.get_user_profile(user_id)
+            user_profile.important_events.append(event)
+            self.memory_manager.update_user_profile(user_id, {"important_events": user_profile.important_events})
+
+    def _generate_proactive_greeting(self, user_id: str) -> Optional[str]:
+        """Generate a proactive greeting that asks about important events."""
+        user_profile = self.memory_manager.get_user_profile(user_id)
+        name = user_profile.preferred_name or "friend"
+        
+        from datetime import date, timedelta
+        today = date.today()
+        yesterday = today - timedelta(days=1)
+        
+        # Check for events that need follow-up
+        for event in user_profile.important_events:
+            if not event.follow_up_done and event.follow_up_needed:
+                # If event was today or yesterday, ask about it
+                if event.event_date == today:
+                    if event.event_type == 'exam':
+                        return f"Hey {name}! How did your exam go today? I remember you were studying for it yesterday."
+                    elif event.event_type == 'interview':
+                        return f"Hey {name}! How did your interview go today? I've been thinking about you!"
+                    elif event.event_type == 'appointment':
+                        return f"Hey {name}! How did your appointment go today? Hope everything went well."
+                    else:
+                        return f"Hey {name}! How did your {event.event_type} go today?"
+                
+                elif event.event_date == yesterday:
+                    if event.event_type == 'exam':
+                        return f"Hey {name}! How did your exam go yesterday? I remember you were preparing for it."
+                    elif event.event_type == 'interview':
+                        return f"Hey {name}! How did your interview go yesterday? I've been wondering how it went!"
+                    elif event.event_type == 'appointment':
+                        return f"Hey {name}! How did your appointment go yesterday? Hope it went smoothly."
+                    else:
+                        return f"Hey {name}! How did your {event.event_type} go yesterday?"
+                
+                # If event is coming up soon, check in
+                elif event.event_date and event.event_date > today and (event.event_date - today).days <= 2:
+                    if event.event_type == 'exam':
+                        return f"Hey {name}! How's the studying going for your exam? It's coming up soon, right?"
+                    elif event.event_type == 'interview':
+                        return f"Hey {name}! How are you feeling about your upcoming interview? Any nerves?"
+                    else:
+                        return f"Hey {name}! How are you feeling about your upcoming {event.event_type}?"
+        
+        return None
+
+    def _mark_event_followed_up(self, user_id: str, event_type: str) -> None:
+        """Mark events as followed up after asking about them."""
+        user_profile = self.memory_manager.get_user_profile(user_id)
+        
+        for event in user_profile.important_events:
+            if event.event_type == event_type and not event.follow_up_done:
+                event.follow_up_done = True
+        
+        self.memory_manager.update_user_profile(user_id, {"important_events": user_profile.important_events})
 
     def _generate_follow_up_questions(self, emotion: str, urgency_level: int, user_name: str, user_id: str) -> List[str]:
         """Generate personalized follow-up questions based on emotion, urgency, and conversation depth."""
