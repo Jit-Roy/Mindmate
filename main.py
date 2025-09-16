@@ -1,5 +1,7 @@
 import asyncio
 import sys
+import atexit
+import uuid
 from datetime import datetime
 from rich.console import Console
 from rich.panel import Panel
@@ -7,6 +9,7 @@ from rich.text import Text
 from rich.prompt import Prompt
 from chatbot import MentalHealthChatbot
 from config import config
+from notification_system import setup_notifications, send_exit_notification
 
 console = Console()
 
@@ -15,8 +18,13 @@ class ChatInterface:
     
     def __init__(self):
         self.chatbot = MentalHealthChatbot()
-        self.user_id = "default_user"  # In a real app, this would be unique per user
+        # Generate unique user ID for each session
+        self.user_id = f"user_{uuid.uuid4().hex[:8]}"
         self.running = True
+        self.notification_system = None
+        
+        # Setup exit handler for notifications
+        atexit.register(self._on_exit)
     
     def display_welcome(self):
         """Display welcome message."""
@@ -105,6 +113,17 @@ class ChatInterface:
         self.chatbot.memory_manager.create_conversation(self.user_id)
         console.print("[green]Conversation history cleared. Fresh start![/green]")
     
+    def _on_exit(self):
+        """Handle application exit - send caring notification."""
+        try:
+            if hasattr(self, 'chatbot') and hasattr(self, 'user_id'):
+                send_exit_notification(self.chatbot.memory_manager, self.user_id)
+            
+            if self.notification_system:
+                self.notification_system.stop_background_monitoring()
+        except Exception as e:
+            pass  # Don't show errors during exit
+    
     async def run(self):
         """Main chat loop."""
         
@@ -118,6 +137,39 @@ class ChatInterface:
             return
         
         self.display_welcome()
+        
+        # Check if there are existing users and offer to continue
+        existing_profiles = self.chatbot.memory_manager.get_all_user_profiles()
+        if existing_profiles:
+            # Show existing users (without IDs for privacy)
+            user_names = [p.name or p.preferred_name for p in existing_profiles.values() if p.name or p.preferred_name]
+            if user_names:
+                console.print(f"\n[dim]I recognize some friends: {', '.join(user_names[:3])}{'...' if len(user_names) > 3 else ''}[/dim]")
+                continue_choice = Prompt.ask("Are you continuing a previous conversation?", choices=["y", "n"], default="n")
+                
+                if continue_choice.lower() == "y":
+                    name_to_find = Prompt.ask("What name did you use before?")
+                    existing_user = self.chatbot.memory_manager.find_user_by_name(name_to_find)
+                    if existing_user:
+                        self.user_id = existing_user.user_id
+                        console.print(f"[green]Welcome back, {existing_user.name or existing_user.preferred_name}! 😊[/green]")
+                        # Update notification system for the existing user
+                        try:
+                            if self.notification_system:
+                                self.notification_system.stop_background_monitoring()
+                            self.notification_system = setup_notifications(self.chatbot.memory_manager, self.user_id)
+                        except Exception:
+                            pass
+                    else:
+                        console.print(f"[yellow]Hmm, I don't recognize that name. Let's start fresh! 🌟[/yellow]")
+        
+        # Setup notification system
+        try:
+            if not self.notification_system:
+                self.notification_system = setup_notifications(self.chatbot.memory_manager, self.user_id)
+            console.print("[dim]🔔 Caring notifications enabled - I'll check in on you periodically[/dim]")
+        except Exception as e:
+            console.print(f"[dim yellow]⚠️  Notifications unavailable: {e}[/dim yellow]")
         
         # Ask if they want to set up profile
         setup = Prompt.ask("\nWould you like to set up your profile first?", choices=["y", "n"], default="n")
@@ -136,7 +188,8 @@ class ChatInterface:
                 
                 # Handle commands
                 if user_input.lower() in ['quit', 'exit']:
-                    console.print("\n[cyan]Take care of yourself! Remember, I'm always here when you need support. 💙[/cyan]")
+                    console.print("\n[cyan]Take care of yourself! I'll keep you in my thoughts. 💙[/cyan]")
+                    self.running = False
                     break
                 
                 elif user_input.lower() == 'help':
@@ -164,7 +217,8 @@ class ChatInterface:
                 self.display_response(response)
                 
             except KeyboardInterrupt:
-                console.print("\n\n[cyan]Take care! Remember, support is always available when you need it. 💙[/cyan]")
+                console.print("\n\n[cyan]Take care! I'll keep you in my thoughts. 💙[/cyan]")
+                self.running = False
                 break
             
             except Exception as e:

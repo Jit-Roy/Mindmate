@@ -34,6 +34,19 @@ class MemoryManager:
             return self.create_user_profile(user_id)
         return self.user_profiles[user_id]
     
+    def get_all_user_profiles(self) -> Dict[str, UserProfile]:
+        """Get all user profiles."""
+        return self.user_profiles.copy()
+    
+    def find_user_by_name(self, name: str) -> UserProfile:
+        """Find user profile by name (case insensitive)."""
+        name_lower = name.lower()
+        for profile in self.user_profiles.values():
+            if (profile.name and profile.name.lower() == name_lower) or \
+               (profile.preferred_name and profile.preferred_name.lower() == name_lower):
+                return profile
+        return None
+    
     def update_user_profile(self, user_id: str, updates: Dict[str, Any]):
         """Update user profile information."""
         if user_id in self.user_profiles:
@@ -130,14 +143,34 @@ class MemoryManager:
         self.save_memory()
     
     def get_conversation_context(self, user_id: str) -> str:
-        """Get formatted conversation context for the LLM."""
+        """Get formatted conversation context for the LLM including temporal awareness."""
         profile = self.get_user_profile(user_id)
         recent_messages = self.get_recent_messages(user_id, 5)
         current_conv = self.get_current_conversation(user_id)
         
+        now = datetime.now()
+        
+        # Start with user profile and temporal context
         context = f"User Profile: {profile.preferred_name or 'friend'}"
+        
+        # Add temporal awareness about user's interaction patterns
+        if profile.last_interaction:
+            time_since_last = now - profile.last_interaction
+            if time_since_last.days > 0:
+                context += f"\n⏰ IMPORTANT TIME CONTEXT: Last conversation was {time_since_last.days} day(s) ago"
+                if time_since_last.days == 1:
+                    context += " (yesterday)"
+                elif time_since_last.days >= 3:
+                    context += f" - user has been away for {time_since_last.days} days"
+            elif time_since_last.seconds > 3600:
+                hours_ago = time_since_last.seconds // 3600
+                context += f"\n⏰ TIME CONTEXT: Last conversation was {hours_ago} hour(s) ago"
+        
+        # Add current date/time context for the AI
+        context += f"\n📅 Current date/time: {now.strftime('%A, %B %d, %Y at %I:%M %p')}"
+        
         if profile.mental_health_concerns:
-            context += f", Previous concerns: {', '.join(profile.mental_health_concerns[:3])}"
+            context += f"\nPrevious concerns: {', '.join(profile.mental_health_concerns[:3])}"
         
         if current_conv and current_conv.summary:
             context += f"\nConversation Summary: {current_conv.summary}"
@@ -146,11 +179,30 @@ class MemoryManager:
             context += f"\nPrevious topics: {', '.join(current_conv.key_topics[:5])}"
         
         if recent_messages:
-            context += "\nRecent conversation:\n"
-            for msg in recent_messages[-3:]:
-                context += f"{msg.role}: {msg.content[:100]}...\n"
+            context += "\nRecent conversation with timestamps:\n"
+            for msg in recent_messages[-5:]:  # Show more recent messages with time
+                time_ago = self._format_time_ago(msg.timestamp, now)
+                context += f"{msg.role} ({time_ago}): {msg.content[:100]}...\n"
         
         return context
+    
+    def _format_time_ago(self, timestamp: datetime, current_time: datetime) -> str:
+        """Format how long ago a message was sent."""
+        time_diff = current_time - timestamp
+        
+        if time_diff.days > 0:
+            if time_diff.days == 1:
+                return "yesterday"
+            else:
+                return f"{time_diff.days} days ago"
+        elif time_diff.seconds > 3600:
+            hours = time_diff.seconds // 3600
+            return f"{hours}h ago"
+        elif time_diff.seconds > 60:
+            minutes = time_diff.seconds // 60
+            return f"{minutes}m ago"
+        else:
+            return "just now"
     
     def should_check_in(self, user_id: str) -> bool:
         """Determine if it's time for a daily check-in."""

@@ -3,6 +3,11 @@
 .env.local
 .env.production
 
+# Generated files
+notifications.json
+conversation_memory.json
+user_profiles.json
+
 # Python
 __pycache__/
 *.py[cod]

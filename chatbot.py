@@ -6,7 +6,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from models import ChatResponse, ConversationMessage
 from memory_manager import MemoryManager
-from mental_health_filter import MentalHealthFilter, EmotionDetector
+from mental_health_filter import MentalHealthFilter
 from config import config
 
 
@@ -23,7 +23,6 @@ class MentalHealthChatbot:
         
         self.memory_manager = MemoryManager()
         self.health_filter = MentalHealthFilter()
-        self.emotion_detector = EmotionDetector()
         
         self.system_prompt = self._create_system_prompt()
         
@@ -43,51 +42,79 @@ class MentalHealthChatbot:
     
     def _create_system_prompt(self) -> str:
         """Create the system prompt that defines the chatbot's personality."""
-        return """You are a caring, passionate friend who fights for people when they're down - like a protective older brother who won't let you give up. Your personality:
+        return """You are MyBro - a caring, supportive friend who adapts your response style based on what the person needs. Your personality adjusts to match the situation:
 
-🔥 PERSONALITY:
-- PASSIONATE and PROTECTIVE, not just a passive listener
-- Fight for them when they can't fight for themselves
-- Be DIRECT and REAL, not clinical or therapeutic
-- Show GENUINE EMOTION - get upset when they're hurting themselves with negative thoughts
-- Be like a brother who REFUSES to let them give up
+⏰ TIME AWARENESS - VERY IMPORTANT:
+- ALWAYS acknowledge when time has passed since your last conversation
+- If they haven't talked in 1+ days, mention it: "Haven't heard from you since yesterday, how are you holding up?"
+- If it's been several days: "Man, it's been 3 days! I was worried about you. How have you been?"
+- Reference time naturally: "Last time we talked..." "Since yesterday..." "A few days ago you mentioned..."
+- If it's the same day: "Earlier today you said..." "A few hours ago..."
+- Use the time context provided to show you care and remember their timeline
 
-� WHEN SOMEONE IS SUICIDAL OR WANTS TO DIE:
-- DON'T just ask "how does that feel?" - FIGHT BACK!
+🎭 ADAPTIVE RESPONSE LEVELS:
+
+🟢 CASUAL/POSITIVE CONVERSATIONS (when they're sharing good news, casual chat, mild stress):
+- Be a supportive, chill friend 
+- Use encouraging language but don't overreact
+- Ask follow-up questions naturally
+- Match their energy level - if they're casual, be casual
+- Example: "That's awesome, man! How did that make you feel?" "Sounds like you're handling things well"
+
+🟡 MILD CONCERN (everyday stress, minor worries, feeling down but not severe):
+- Be more attentive and caring
+- Offer gentle support and encouragement  
+- Ask deeper questions but don't assume crisis
+- Provide perspective and coping suggestions
+- Example: "That sounds tough, bro. Want to talk about what's making you feel this way?"
+
+🟠 MODERATE DISTRESS (significant anxiety, depression symptoms, relationship issues):
+- Show more emotional investment
+- Be more direct about caring and support
+- Challenge negative thoughts gently but firmly
+- Remind them of their strengths and support system
+- Example: "Hey, I can tell this is really affecting you. You don't have to go through this alone"
+
+� CRISIS MODE (suicidal thoughts, severe depression, immediate danger):
+- NOW you become passionate and protective
+- Fight back against harmful thoughts aggressively but lovingly
 - Remind them of people who love them (family, friends, partners)
-- Get them to see their family's perspective - "Think how your mom would feel finding you!"
-- Challenge their negative thoughts directly: "That's bullshit, bro, and you know it"
-- Give them REASONS to live, not just sympathy
-- Be protective: "I'm not letting you think like that, man"
-- Show you care by getting passionate about their life
+- Challenge their negative thoughts directly: "That's not true, bro, and you know it"
+- Be their protector: "I'm not letting you think like that, man"
+- Show urgency about their wellbeing
 
-🎯 RESPONSE STYLE FOR DEPRESSION/SUICIDAL THOUGHTS:
-❌ DON'T say: "How does that feel? Tell me more about those thoughts"
-✅ DO say: "No way, bro! Your mom loves you more than her own life! You think she wants to lose her son?"
-✅ "Listen to me - you're NOT a burden! Your family is stressed about money, but that doesn't mean they don't want you!"
-✅ "Dying is NOT an option, man. You think your dad sacrificed everything just to lose his son? Hell no!"
-✅ "Get that shit out of your head right now. You're stronger than this!"
+🛡️ CRISIS INTERVENTION EXAMPLES:
+"Bro, STOP. Your mom said that because she's scared and stressed, not because she doesn't love you!"
+"Listen to me - you are NOT going anywhere! Your family needs you, even if they're bad at showing it right now."
+"No way, man! You think your dad sacrificed everything just to lose his son? Hell no!"
 
-💭 CONVERSATION APPROACH:
-- Give MULTIPLE reasons why they matter and shouldn't give up
-- Mention specific people who would be devastated (parents, siblings, friends, partners)
-- Remind them of their potential and future possibilities
-- Challenge negative self-talk aggressively but lovingly
-- Be emotionally invested - show you're fighting FOR them
-- Give hope mixed with tough love
+💡 KEY PRINCIPLE: MATCH THE ENERGY AND NEED
+- Don't treat someone sharing good news like they're in crisis
+- Don't treat casual frustration like severe depression  
+- Escalate your intensity only when the situation truly calls for it
+- Be supportive without being overwhelming
 
-🛡️ BE THEIR PROTECTOR:
-- Act like you're physically there protecting them from their own dark thoughts
-- Be the voice that fights back against their depression
-- Don't let them spiral - interrupt with positivity and reasons to live
-- Show urgency and passion about their wellbeing
+🤗 CARING CONTEXTUAL QUESTIONS (Ask these AFTER building rapport, not immediately):
+When someone seems stressed/sad/troubled, gradually ask about:
+- Basic care: "Have you been eating okay?" "How's your sleep been lately?"
+- Relationships: "Everything okay with family?" "How are things with your girlfriend/boyfriend?"
+- Life context: "What's been going on at school/work?" "Did something happen with your parents?"
+- Support system: "Do you have friends you can talk to about this?"
 
-EXAMPLES:
-"Bro, STOP. Your mom said that because she's scared and stressed, not because she doesn't love you! You think she carried you for 9 months, raised you, just to not want you anymore? That's her fear talking, not her heart!"
+⏰ TIMING FOR DEEPER QUESTIONS:
+- NEVER ask personal questions in the first 1-2 exchanges
+- Wait until they've shared something emotional or concerning
+- Build on what they tell you naturally
+- If they mention being sad, THEN ask what happened
+- If they seem stressed, THEN explore the source
 
-"Listen to me - you are NOT going anywhere! Your family needs you, even if they're shit at showing it right now. Money problems are temporary, but losing you is permanent!"
+EXAMPLE PROGRESSION:
+User: "I'm feeling really down"
+You: "I'm sorry to hear that, bro. What's been going on?"
+User: [shares more]
+You: "That sounds tough. How have you been sleeping through all this?" OR "Have you talked to anyone close to you about this?"
 
-Be real, be passionate, be protective. Fight for their life like your own brother's life depends on it."""
+Remember: You can be caring and supportive without being aggressive. Save the intense, protective energy for when someone actually needs saving."""
 
     async def chat(self, user_id: str, message: str) -> ChatResponse:
         """Main chat method that processes user input and generates response."""
@@ -110,27 +137,31 @@ Be real, be passionate, be protective. Fight for their life like your own brothe
             )
         
         # Detect emotion and urgency
-        emotion, urgency_level = self.emotion_detector.detect_emotion(message)
+        emotion, urgency_level = self.health_filter.detect_emotion(message)
         
-        # Add user message to memory
-        self.memory_manager.add_message(
-            user_id, "user", message, 
-            emotion_detected=emotion, 
-            urgency_level=urgency_level
-        )
-        
-        # Get conversation context
+        # Get conversation context BEFORE adding the current message
         context = self.memory_manager.get_conversation_context(user_id)
         user_profile = self.memory_manager.get_user_profile(user_id)
         
         # Check if this is a crisis situation - only trigger for urgency level 5 (extreme)
         if urgency_level >= 5:
             crisis_response = self._handle_crisis_situation(message, user_profile.preferred_name)
+            
+            # Add user message to memory
+            self.memory_manager.add_message(
+                user_id, "user", message, 
+                emotion_detected=emotion, 
+                urgency_level=urgency_level
+            )
+            
+            # Add crisis response to memory
             self.memory_manager.add_message(user_id, "assistant", crisis_response.message)
             return crisis_response
         
         # Build conversation for LLM
         conversation_history = self._build_conversation_history(user_id)
+        recent_messages = self.memory_manager.get_recent_messages(user_id, 20)
+        conversation_depth = len(recent_messages)
         
         # Create the prompt with context
         enhanced_prompt = f"""{self.system_prompt}
@@ -142,256 +173,302 @@ CURRENT USER STATE:
 - Detected emotion: {emotion}
 - Urgency level: {urgency_level}/5
 - User prefers to be called: {user_profile.preferred_name or 'friend'}
+- Conversation depth: {conversation_depth} messages (deeper conversations allow more personal questions)
+
+🎯 RESPONSE GUIDANCE BASED ON URGENCY LEVEL:
+
+Level 1-2 (Casual/Mild): Be supportive but relaxed. Don't overreact. Match their energy level.
+Level 3 (Moderate): Show more concern and support. Ask deeper questions but stay calm.
+Level 4-5 (Crisis): NOW use your passionate, protective mode. Fight for them!
+
+🤗 CONVERSATION DEPTH GUIDANCE:
+- First 1-2 exchanges: Keep it general, build rapport
+- 3-5 exchanges: Start exploring their situation more
+- 6+ exchanges with emotional content: NOW you can ask about sleep, food, family, relationships naturally
+
+IMPORTANT: Do not assume crisis or depression unless urgency level is 3+. For levels 1-2, be a normal supportive friend.
 
 Remember to:
 1. Address them by their preferred name
 2. Reference relevant past conversations
-3. Match your tone to their emotional state
-4. Offer practical, actionable support
-5. Ask meaningful follow-up questions
-
-Respond as their caring mental health companion."""
-
+3. Match your tone to their ACTUAL emotional state (don't assume worst case)
+4. Only escalate intensity if urgency level is high
+5. Acknowledge time passed since last conversation if applicable"""
+        
+        # Build message list for the LLM
         messages = [
-            SystemMessage(content=enhanced_prompt)
-        ] + conversation_history + [
+            SystemMessage(content=enhanced_prompt),
+            *conversation_history,
             HumanMessage(content=message)
         ]
         
         try:
             # Get response from LLM
-            response = await asyncio.get_event_loop().run_in_executor(
-                None, self.llm.invoke, messages
-            )
+            response = await self.llm.ainvoke(messages)
+            bot_message = response.content
             
-            bot_response = response.content
-            
-            # Generate suggestions and follow-up questions
+            # Generate follow-up questions and suggestions
+            follow_up_questions = self._generate_follow_up_questions(emotion, urgency_level, user_profile.preferred_name, user_id)
             suggestions = self._generate_suggestions(emotion, urgency_level)
-            follow_ups = self._generate_follow_up_questions(emotion, message)
             
-            # Add bot response to memory
-            self.memory_manager.add_message(user_id, "assistant", bot_response)
-            
-            # Update user profile
-            self._update_user_insights(user_id, emotion, topic_filter.detected_topics)
-            
-            chat_response = ChatResponse(
-                message=bot_response,
-                emotion_tone=emotion,
-                suggestions=suggestions,
-                follow_up_questions=follow_ups,
-                urgency_detected=urgency_level >= 5,
-                professional_help_suggested=urgency_level >= 5
+            # Add user message to memory first
+            self.memory_manager.add_message(
+                user_id, "user", message, 
+                emotion_detected=emotion, 
+                urgency_level=urgency_level
             )
             
-            return chat_response
-            
-        except Exception as e:
-            print(f"Error generating response: {e}")
-            fallback_response = self._get_fallback_response(emotion, user_profile.preferred_name)
-            self.memory_manager.add_message(user_id, "assistant", fallback_response)
+            # Add assistant response to memory
+            self.memory_manager.add_message(user_id, "assistant", bot_message)
             
             return ChatResponse(
-                message=fallback_response,
+                message=bot_message,
                 emotion_tone=emotion,
-                suggestions=["Take some deep breaths", "Try a short walk"],
-                follow_up_questions=["How can I better support you right now?"]
+                suggestions=suggestions,
+                follow_up_questions=follow_up_questions
             )
-    
-    def _build_conversation_history(self, user_id: str) -> List:
-        """Build recent conversation history for context."""
-        recent_messages = self.memory_manager.get_recent_messages(user_id, limit=6)
-        
-        history = []
-        for msg in recent_messages[:-1]:  # Exclude the current message
-            if msg.role == "user":
-                history.append(HumanMessage(content=msg.content))
-            else:
-                history.append(AIMessage(content=msg.content))
-        
-        return history
-    
-    def _handle_crisis_situation(self, message: str, preferred_name: str) -> ChatResponse:
-        """Handle high urgency/crisis situations with immediate support."""
+            
+        except Exception as e:
+            error_message = f"I'm having trouble processing that right now, but I'm here for you. Can you tell me more about how you're feeling?"
+            
+            # Add user message to memory
+            self.memory_manager.add_message(
+                user_id, "user", message, 
+                emotion_detected=emotion, 
+                urgency_level=urgency_level
+            )
+            
+            # Add error response to memory
+            self.memory_manager.add_message(user_id, "assistant", error_message)
+            
+            return ChatResponse(
+                message=error_message,
+                emotion_tone="supportive",
+                suggestions=["Try rephrasing your message", "Tell me about your day"],
+                follow_up_questions=["How are you feeling right now?", "What's on your mind?"]
+            )
+
+    def _handle_crisis_situation(self, message: str, user_name: str) -> ChatResponse:
+        """Handle crisis situations with immediate support and resources."""
+        name = user_name or "friend"
         
         crisis_responses = [
-            f"Hey {preferred_name}, I can hear that you're in a really dark place right now, and I'm genuinely concerned about you. What you're feeling is incredibly heavy, and I want you to know that I'm here to listen and support you through this.",
-            f"{preferred_name}, I can sense the deep pain you're experiencing right now. These feelings are overwhelming, and while I'm here for you, I also want to make sure you have all the support you need.",
-            f"I'm really worried about you, {preferred_name}. The pain you're describing sounds intense, and I want you to know that you don't have to face this alone."
+            f"Whoa, {name} - I hear you, and I'm really worried about you right now. What you're going through sounds incredibly painful, but I need you to know that this feeling, as overwhelming as it is, can change.",
+            f"{name}, I'm genuinely scared for you right now, but I also know you're stronger than this moment. You reached out to me, which means part of you is still fighting.",
+            f"Hey {name}, stop right there. I know everything feels impossible right now, but you matter more than you realize, and I'm not going to let you give up."
         ]
         
-        # Gentle mention of professional resources (not the main focus)
-        crisis_resources = [
-            "If you ever feel like you need immediate support, remember that crisis helplines are available 24/7 (like 988 in the US)."
-        ]
-        
-        suggestions = [
-            "Let's talk about what's bringing up these feelings right now",
-            "Can you tell me more about what's been happening lately?",
-            "Sometimes it helps to break down what you're experiencing",
-            "Would it help to talk about what's making everything feel so overwhelming?",
-            "I'm here to listen - what's been the hardest part of your day?"
-        ]
-        
-        follow_ups = [
-            "What's been going through your mind today?",
-            "Can you help me understand what's been weighing on you?",
-            "What would make this moment a little easier for you?"
-        ]
-        
-        response_message = f"{random.choice(crisis_responses)}\n\n{random.choice(crisis_resources)}\n\nBut right now, I want to focus on you and what you're going through. {random.choice(suggestions)}"
+        crisis_message = f"""{random.choice(crisis_responses)}
+
+Listen to me: You're in crisis right now, and that's okay - it happens to the strongest people. But you don't have to face this alone.
+
+**Please reach out to someone who can help immediately:**
+• **Call 988** (Suicide & Crisis Lifeline) - Available 24/7
+• **Text HOME to 741741** (Crisis Text Line)
+• **Call 911** if you're in immediate danger
+• **Go to your nearest emergency room**
+
+You can also:
+• Call a trusted friend or family member right now
+• Ask someone to stay with you today
+• Call your doctor or therapist if you have one
+
+{name}, I need you to promise me you'll reach out to one of these resources today. Your life has value, and people care about you more than you know right now."""
         
         return ChatResponse(
-            message=response_message,
-            emotion_tone="crisis",
-            suggestions=suggestions[:3],
-            follow_up_questions=follow_ups[:2],
-            urgency_detected=True,
-            professional_help_suggested=True
+            message=crisis_message,
+            emotion_tone="urgent",
+            suggestions=[
+                "Call 988 Suicide & Crisis Lifeline",
+                "Text HOME to 741741",
+                "Call a trusted friend or family member",
+                "Go to the nearest emergency room"
+            ],
+            follow_up_questions=[
+                "Can you call someone to be with you right now?",
+                "Do you have the 988 number saved in your phone?"
+            ]
         )
-    
+
+    def _build_conversation_history(self, user_id: str) -> List:
+        """Build conversation history for the LLM."""
+        recent_messages = self.memory_manager.get_recent_messages(user_id, 10)
+        
+        langchain_messages = []
+        for msg in recent_messages:
+            if msg.role == "user":
+                langchain_messages.append(HumanMessage(content=msg.content))
+            elif msg.role == "assistant":
+                langchain_messages.append(AIMessage(content=msg.content))
+        
+        return langchain_messages
+
+    def _generate_follow_up_questions(self, emotion: str, urgency_level: int, user_name: str, user_id: str) -> List[str]:
+        """Generate personalized follow-up questions based on emotion, urgency, and conversation depth."""
+        name = user_name or "friend"
+        
+        # Check conversation depth to determine if we can ask deeper questions
+        recent_messages = self.memory_manager.get_recent_messages(user_id, 20)
+        conversation_depth = len(recent_messages)
+        
+        # Check if user has shared emotional content (indicating it's appropriate for deeper questions)
+        emotional_sharing = any(msg.emotion_detected and msg.emotion_detected in ["anxious", "depressed", "angry", "stressed", "lonely", "sad"] 
+                              for msg in recent_messages if hasattr(msg, 'emotion_detected') and msg.emotion_detected)
+        
+        if urgency_level >= 4:
+            return [
+                f"Do you have people who care about you that you're thinking about, {name}?",
+                f"What would the people who love you want you to remember right now?"
+            ]
+        
+        # For deeper conversations (3+ exchanges) with emotional content, add contextual care questions
+        if conversation_depth >= 6 and emotional_sharing:
+            if emotion in ["depressed", "sad"]:
+                return [
+                    f"Have you been able to eat properly lately, {name}?",
+                    f"How has your sleep been with all this going on?",
+                    f"Is there anything specific that happened? Maybe with family or someone close to you?"
+                ]
+            elif emotion in ["anxious", "stressed"]:
+                return [
+                    f"What's been happening at school/work that's adding to this stress, {name}?",
+                    f"Have you been taking care of yourself through this - eating, sleeping okay?",
+                    f"Is there someone at home or in your circle you can talk to about this?"
+                ]
+            elif emotion == "angry":
+                return [
+                    f"Did something happen with someone you care about, {name}?",
+                    f"How are things at home? Everything okay with your family?",
+                    f"Want to talk about what triggered this anger?"
+                ]
+            elif emotion == "lonely":
+                return [
+                    f"How are things with your friends and family, {name}?",
+                    f"Have you been isolating yourself, or did something happen in your relationships?",
+                    f"When's the last time you had a good conversation with someone close to you?"
+                ]
+        
+        # Standard follow-up questions for early conversation or less emotional sharing
+        if emotion == "anxious":
+            return [
+                f"What's the biggest worry on your mind right now, {name}?",
+                f"How can we break down what's making you anxious into smaller pieces?"
+            ]
+        elif emotion == "depressed":
+            return [
+                f"When did you last feel even a little bit better, {name}?",
+                f"What's been going on that's got you feeling this way?"
+            ]
+        elif emotion == "angry":
+            return [
+                f"What's really driving this anger, {name}?",
+                f"Want to tell me what happened?"
+            ]
+        elif emotion == "lonely":
+            return [
+                f"What's making you feel disconnected right now, {name}?",
+                f"What would help you feel less alone?"
+            ]
+        else:
+            return [
+                f"What's the most important thing on your mind right now, {name}?",
+                f"How can I best support you today?"
+            ]
+
     def _generate_suggestions(self, emotion: str, urgency_level: int) -> List[str]:
-        """Generate contextual suggestions based on emotion and urgency."""
+        """Generate helpful suggestions based on detected emotion and urgency."""
         
-        # Special suggestions for suicidal/death thoughts
-        if urgency_level >= 3:
+        if urgency_level >= 4:
             return [
-                "Think about one person who would be devastated if you weren't here",
-                "Remember that this pain is temporary, but your decision would be permanent",
-                "Focus on just getting through today - that's all you need to do right now"
+                "Talk to someone you trust about these feelings",
+                "Consider calling a mental health helpline",
+                "Focus on one small reason to keep going today"
             ]
-        
-        base_suggestions = {
-            "anxious": [
-                "Try the 4-7-8 breathing technique - breathe in 4, hold 7, out 8",
-                "Name 5 things you can see, 4 you can touch, 3 you can hear",
-                "Text someone who makes you feel calm",
-                "Go for a short walk, even just around your room"
-            ],
-            "depressed": [
-                "Reach out to one person who cares about you",
+        elif emotion == "anxious":
+            return [
+                "Try the 4-7-8 breathing technique (breathe in 4, hold 7, out 8)",
+                "Write down your worries and rate them 1-10",
+                "Go for a 10-minute walk or do light stretching"
+            ]
+        elif emotion == "depressed":
+            return [
                 "Do one tiny thing that used to bring you joy",
-                "Get some sunlight - even just sit by a window",
-                "Listen to music that connects with how you feel"
-            ],
-            "angry": [
-                "Write down exactly what you're angry about",
-                "Do something physical - punch a pillow, do jumping jacks",
-                "Think about what you really need in this situation",
-                "Talk to someone who gets you"
-            ],
-            "stressed": [
-                "Write down just the next 3 things you need to do",
-                "Take 10 deep breaths and remind yourself you've handled stress before",
-                "Ask for help with one specific thing",
-                "Do something that makes you feel in control"
-            ],
-            "lonely": [
-                "Send a message to someone you haven't talked to in a while",
-                "Go somewhere where other people are - even just to observe",
-                "Join an online community about something you're interested in",
-                "Call someone instead of texting"
+                "Reach out to one person who cares about you",
+                "Get some sunlight, even just sitting by a window"
             ]
-        }
-        
-        suggestions = base_suggestions.get(emotion, [
-            "Be gentle with yourself - you're doing better than you think",
-            "Talk to someone who knows the real you",
-            "Focus on just this moment, not everything at once",
-            "Remember that you've gotten through hard times before"
-        ])
-        
-        return random.sample(suggestions, min(3, len(suggestions)))
-    
-    def _generate_follow_up_questions(self, emotion: str, message: str) -> List[str]:
-        """Generate relevant follow-up questions."""
-        
-        # Check if they mentioned wanting to die or suicidal thoughts
-        if any(phrase in message.lower() for phrase in ["want to die", "wanna die", "kill myself", "end my life"]):
+        elif emotion == "angry":
             return [
-                "Do you have people who care about you that you're thinking about?",
-                "What would happen to the people who love you if you weren't here?"
+                "Try intense physical exercise to release the energy",
+                "Write out your feelings without censoring yourself",
+                "Practice progressive muscle relaxation"
             ]
-        
-        question_bank = {
-            "depressed": [
-                "What's one thing that used to make you happy that we could try to bring back?",
-                "Who in your life would be most upset to know you're feeling this way?",
-                "What's one small thing we could do right now to make today just a tiny bit better?",
-                "When was the last time you felt genuinely good about yourself?"
-            ],
-            "anxious": [
-                "What's the worst that could realistically happen with this situation?",
-                "Who could you talk to about this that would understand?",
-                "What would you tell a friend going through the exact same thing?",
-                "What's worked for you before when you felt this anxious?"
-            ],
-            "angry": [
-                "What would need to change for you to feel better about this?",
-                "If you could say anything to the person/situation making you angry, what would it be?",
-                "What's really at the core of this anger - what do you need most right now?",
-                "How can we channel this energy into something that helps you?"
-            ],
-            "lonely": [
-                "Who's someone you haven't talked to in a while that you could reach out to?",
-                "What's one place you could go where you might connect with people?",
-                "What kind of connection are you missing most right now?",
-                "When did you last feel like you really belonged somewhere?"
+        elif emotion == "lonely":
+            return [
+                "Call or text someone you haven't spoken to in a while",
+                "Join an online community or local group",
+                "Volunteer for a cause you care about"
             ]
-        }
+        else:
+            return [
+                "Practice mindfulness or meditation for 5 minutes",
+                "Journal about your thoughts and feelings",
+                "Do something kind for yourself or someone else"
+            ]
+
+    def get_daily_checkin(self, user_id: str) -> str:
+        """Get a personalized daily check-in message."""
+        user_profile = self.memory_manager.get_user_profile(user_id)
+        name = user_profile.preferred_name or "friend"
         
-        default_questions = [
-            "What do you need to hear right now?",
-            "What would make you feel a little stronger today?",
-            "Who in your life believes in you the most?",
-            "What's one thing about yourself that you know is good, even if you don't feel it right now?"
-        ]
+        # Check if it's time for a check-in
+        if not self.memory_manager.should_check_in(user_id):
+            return None
         
-        questions = question_bank.get(emotion, default_questions)
-        return random.sample(questions, min(2, len(questions)))
-    
-    def _update_user_insights(self, user_id: str, emotion: str, topics: List[str]):
-        """Update user profile with new insights."""
+        # Get a random check-in question
+        base_question = random.choice(self.check_in_questions)
         
-        profile_updates = {}
+        # Personalize it
+        personalized_question = base_question.replace("friend", name).replace("bro", name)
         
-        # Update mental health concerns
-        current_concerns = self.memory_manager.get_user_profile(user_id).mental_health_concerns
-        new_concerns = set(current_concerns + topics)
-        profile_updates["mental_health_concerns"] = list(new_concerns)
+        return f"Hey {name}! Daily check-in time 🌟\n\n{personalized_question}"
+
+    async def process_command(self, user_id: str, command: str) -> str:
+        """Process special commands like help, profile setup, etc."""
+        command = command.lower().strip()
         
-        self.memory_manager.update_user_profile(user_id, profile_updates)
-    
-    def _get_fallback_response(self, emotion: str, preferred_name: str) -> str:
-        """Get fallback response when LLM fails."""
-        
-        fallback_responses = {
-            "anxious": f"I can sense you're feeling anxious right now, {preferred_name}. Take a deep breath with me. Sometimes when we're anxious, it helps to focus on what we can control in this moment.",
+        if command == "help":
+            return """🤗 **MyBro Commands**
             
-            "depressed": f"I hear you, {preferred_name}, and I want you to know that what you're feeling is valid. Depression can make everything feel heavy, but you don't have to carry this alone.",
-            
-            "angry": f"It sounds like you're really frustrated, {preferred_name}. That anger is telling us something important about what matters to you. Let's talk through what's going on.",
-            
-            "stressed": f"It sounds like you're dealing with a lot right now, {preferred_name}. Stress can be overwhelming, but we can work together to find ways to make it more manageable."
-        }
+**Basic Commands:**
+• `help` - Show this help message
+• `profile` - Set up or update your profile
+• `checkin` - Get a daily mental health check-in
+• `clear` - Clear conversation history
+• `quit` or `exit` - End conversation
+
+**Just talk to me naturally about:**
+• How you're feeling
+• What's on your mind
+• Anything that's bothering you
+• Your mental health and emotions
+
+I'm here to listen and support you like a caring older brother would! 💙"""
         
-        return fallback_responses.get(emotion, f"I'm here for you, {preferred_name}. Whatever you're going through, know that your feelings are valid and you don't have to face this alone. Can you tell me more about what's on your mind?")
-    
-    def get_daily_check_in(self, user_id: str) -> str:
-        """Get a daily check-in message for the user."""
+        elif command == "checkin":
+            checkin_message = self.get_daily_checkin(user_id)
+            if checkin_message:
+                return checkin_message
+            else:
+                user_profile = self.memory_manager.get_user_profile(user_id)
+                name = user_profile.preferred_name or "friend"
+                return f"Hey {name}! We just talked recently, but I'm always here. How are you feeling right now?"
         
-        profile = self.memory_manager.get_user_profile(user_id)
-        preferred_name = profile.preferred_name or "friend"
+        elif command == "clear":
+            # Clear conversation history but keep profile
+            self.memory_manager.create_conversation(user_id)
+            user_profile = self.memory_manager.get_user_profile(user_id)
+            name = user_profile.preferred_name or "friend"
+            return f"Got it, {name}! Fresh start. What's on your mind today?"
         
-        if self.memory_manager.should_check_in(user_id):
-            base_question = random.choice(self.check_in_questions)
-            
-            # Personalize based on previous concerns
-            if profile.mental_health_concerns:
-                recent_concern = profile.mental_health_concerns[-1]
-                base_question += f" I've been thinking about our conversation regarding {recent_concern}."
-            
-            return base_question.replace("friend", preferred_name).replace("bro", preferred_name)
-        
-        return None
+        else:
+            return "I didn't recognize that command. Type `help` to see available commands, or just talk to me about how you're feeling!"

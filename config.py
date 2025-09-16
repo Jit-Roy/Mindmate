@@ -10,7 +10,7 @@ class Config(BaseModel):
     
     # Gemini API Configuration
     gemini_api_key: str = os.getenv("GEMINI_API_KEY", "")
-    model_name: str = os.getenv("MODEL_NAME", "gemini-1.5-flash")
+    model_name: str = os.getenv("MODEL_NAME", "gemini-2.5-flash")
     max_tokens: int = int(os.getenv("MAX_TOKENS", "1000"))
     temperature: float = float(os.getenv("TEMPERATURE", "0.7"))
     

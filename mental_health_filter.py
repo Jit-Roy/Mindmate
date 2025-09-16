@@ -15,40 +15,53 @@ class MentalHealthFilter:
             google_api_key=config.gemini_api_key,
             temperature=0.3  # Lower temperature for more consistent filtering
         )
+        
+        self.emotion_keywords = {
+            "anxious": ["anxious", "worried", "nervous", "panic", "fear"],
+            "depressed": ["sad", "depressed", "hopeless", "empty", "worthless"],
+            "angry": ["angry", "frustrated", "mad", "furious", "irritated"],
+            "happy": ["happy", "joy", "excited", "cheerful", "positive"],
+            "stressed": ["stressed", "overwhelmed", "pressure", "tense"],
+            "lonely": ["lonely", "alone", "isolated", "disconnected"],
+            "confused": ["confused", "lost", "uncertain", "unclear"],
+            "grateful": ["grateful", "thankful", "appreciate", "blessed"]
+        }
     
     def is_mental_health_related(self, message: str) -> MentalHealthTopicFilter:
-        """Determine if a message is related to mental health."""
+        """Determine if a message is related to mental health using Gemini API."""
         
-        # Quick keyword check first
-        message_lower = message.lower()
-        keyword_matches = [
-            keyword for keyword in config.mental_health_keywords 
-            if keyword in message_lower
-        ]
-        
-        if keyword_matches:
-            return MentalHealthTopicFilter(
-                is_mental_health_related=True,
-                confidence_score=0.9,
-                detected_topics=keyword_matches,
-                reason="Contains mental health keywords"
-            )
-        
-        # Use LLM for more nuanced detection
-        system_prompt = """You are a mental health topic classifier. Determine if the user's message is related to mental health, emotional well-being, relationships, stress, mood, or personal struggles.
+        # Use Gemini API for comprehensive mental health topic detection
+        system_prompt = """You are a mental health topic classifier for a therapeutic chatbot named MyBro. Your job is to determine if ANY message could be part of a valid mental health conversation or therapeutic relationship.
 
-Mental health related topics include:
-- Emotions (sad, happy, angry, anxious, etc.)
-- Mental health conditions
-- Stress and coping
-- Relationships and social issues
-- Life challenges and struggles
-- Sleep and self-care
-- Personal growth and therapy
-- Work-life balance
-- Family issues
+MENTAL HEALTH RELATED includes:
+- Emotions and feelings (sad, happy, anxious, stressed, angry, excited, etc.)
+- Mental health conditions and symptoms
+- Life challenges, struggles, and personal issues
+- Relationships, family, and social problems  
+- Work stress, school pressure, life changes
+- Sleep, self-care, and wellness topics
+- Personal growth, therapy, and healing
+- Greetings and check-ins ("Hi", "Hello", "How are you?") - these are valid starts to mental health conversations
+- Conversation continuity ("Do you remember me?", "We talked before", "Last time...")
+- Any personal questions that could lead to emotional support
+- Casual conversation that builds therapeutic rapport
+- Questions about the AI's memory or previous interactions
 
-Respond with only 'YES' or 'NO' and a brief reason."""
+BE VERY INCLUSIVE - Mental health support often starts with simple interactions like:
+- "Hi" - someone reaching out for connection
+- "How's it going?" - checking in on well-being  
+- "Remember me?" - maintaining therapeutic relationship
+- "What's up?" - casual opening to deeper conversation
+
+ONLY classify as NON-mental health if it's clearly:
+- Pure academic/factual questions with no personal element ("What's the capital of France?")
+- Technical instructions unrelated to well-being ("How do I code in Python?")
+- Commercial/business inquiries
+- Spam or completely unrelated content
+
+IMPORTANT: When in doubt, classify as MENTAL HEALTH RELATED. It's better to be inclusive than to block someone seeking support.
+
+Respond with only 'YES' or 'NO' and a brief reason (max 20 words)."""
         
         try:
             messages = [
@@ -82,28 +95,6 @@ Respond with only 'YES' or 'NO' and a brief reason."""
     def get_redirect_response(self) -> str:
         """Get a friendly response to redirect non-mental health conversations."""
         return random.choice(config.non_mental_health_responses)
-
-
-class EmotionDetector:
-    """Detect emotions and urgency in user messages."""
-    
-    def __init__(self):
-        self.llm = ChatGoogleGenerativeAI(
-            model=config.model_name,
-            google_api_key=config.gemini_api_key,
-            temperature=0.3
-        )
-        
-        self.emotion_keywords = {
-            "anxious": ["anxious", "worried", "nervous", "panic", "fear"],
-            "depressed": ["sad", "depressed", "hopeless", "empty", "worthless"],
-            "angry": ["angry", "frustrated", "mad", "furious", "irritated"],
-            "happy": ["happy", "joy", "excited", "cheerful", "positive"],
-            "stressed": ["stressed", "overwhelmed", "pressure", "tense"],
-            "lonely": ["lonely", "alone", "isolated", "disconnected"],
-            "confused": ["confused", "lost", "uncertain", "unclear"],
-            "grateful": ["grateful", "thankful", "appreciate", "blessed"]
-        }
     
     def detect_emotion(self, message: str) -> tuple[str, int]:
         """Detect primary emotion and urgency level (1-5)."""
