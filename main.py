@@ -9,7 +9,7 @@ from rich.text import Text
 from rich.prompt import Prompt
 from chatbot import MentalHealthChatbot
 from config import config
-from notification_system import setup_notifications, send_exit_notification
+from notification import setup_notifications, send_exit_notification
 
 console = Console()
 

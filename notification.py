@@ -19,9 +19,8 @@ try:
     NOTIFICATIONS_AVAILABLE = True
 except ImportError:
     NOTIFICATIONS_AVAILABLE = False
-    print("⚠️  plyer not installed. System notifications disabled. Install with: pip install plyer")
 
-from memory_manager import MemoryManager
+from memory import MemoryManager
 from models import ConversationMessage
 
 @dataclass
@@ -89,7 +88,7 @@ class NotificationSystem:
                 with open(self.notification_file, 'r') as f:
                     return json.load(f)
         except Exception as e:
-            print(f"Error loading notification history: {e}")
+            pass
         return {}
 
     def _save_notification_history(self):
@@ -98,7 +97,7 @@ class NotificationSystem:
             with open(self.notification_file, 'w') as f:
                 json.dump(self.notification_history, f, indent=2)
         except Exception as e:
-            print(f"Error saving notification history: {e}")
+            pass
 
     def _can_send_notification(self, rule_name: str, user_id: str) -> bool:
         """Check if enough time has passed since last notification of this type"""
@@ -123,7 +122,6 @@ class NotificationSystem:
     def send_system_notification(self, title: str, message: str, icon_path: str = None):
         """Send system notification (Windows/Mac/Linux)"""
         if not NOTIFICATIONS_AVAILABLE:
-            print(f"📱 Notification: {title} - {message}")
             return
 
         try:
@@ -135,8 +133,7 @@ class NotificationSystem:
                 toast=True
             )
         except Exception as e:
-            print(f"Error sending system notification: {e}")
-            print(f"📱 Notification: {title} - {message}")
+            pass
 
     def _get_user_context(self, user_id: str) -> Dict:
         """Get user context for personalized notifications"""
@@ -223,8 +220,6 @@ class NotificationSystem:
                 # Record notification
                 self._record_notification(rule.name, user_id)
                 
-                print(f"✅ Sent {rule.name} notification to {context['name']}")
-                
                 # Only send one notification per check (highest priority)
                 break
 
@@ -241,19 +236,19 @@ class NotificationSystem:
                     self.check_and_send_notifications(user_id)
                     time.sleep(check_interval_minutes * 60)  # Convert to seconds
                 except Exception as e:
-                    print(f"Error in notification monitoring: {e}")
+                    pass
                     time.sleep(60)  # Wait 1 minute before retrying
         
         self.notification_thread = threading.Thread(target=monitoring_loop, daemon=True)
         self.notification_thread.start()
-        print(f"🔔 Background notification monitoring started for {user_id}")
+        pass
 
     def stop_background_monitoring(self):
         """Stop background monitoring"""
         self.is_running = False
         if self.notification_thread:
             self.notification_thread.join(timeout=1)
-        print("🔕 Background notification monitoring stopped")
+        pass
 
     def send_immediate_notification(self, user_id: str, message: str, title: str = "MyBro"):
         """Send an immediate notification without rule checking"""
@@ -261,7 +256,7 @@ class NotificationSystem:
         formatted_message = message.format(**context)
         
         self.send_system_notification(title, formatted_message)
-        print(f"📱 Immediate notification sent to {context['name']}: {formatted_message}")
+        pass
 
     def get_suggested_checkin_message(self, user_id: str) -> str:
         """Get a personalized check-in message based on user's recent state"""
@@ -313,38 +308,3 @@ def send_exit_notification(memory_manager: MemoryManager, user_id: str):
         message, 
         "MyBro cares about you"
     )
-
-if __name__ == "__main__":
-    # Demo the notification system
-    print("🔔 MyBro Notification System Demo")
-    print("=" * 40)
-    
-    from memory_manager import MemoryManager
-    
-    memory = MemoryManager()
-    notif_system = NotificationSystem(memory)
-    
-    # Create demo user
-    user_id = "demo_user"
-    profile = memory.create_user_profile(user_id, "Alex")
-    
-    # Add some demo messages
-    memory.add_message(user_id, "user", "I'm feeling really anxious today", "anxious", 3)
-    memory.add_message(user_id, "assistant", "I understand your anxiety, Alex. Let's work through this together.")
-    
-    print(f"✅ Demo user created: {profile.name}")
-    
-    # Test different notification types
-    print("\n📱 Testing notification messages:")
-    for rule in notif_system.rules:
-        context = notif_system._get_user_context(user_id)
-        message = rule.message_template.format(**context)
-        print(f"  {rule.name}: {message}")
-    
-    # Test suggested check-in
-    checkin = notif_system.get_suggested_checkin_message(user_id)
-    print(f"\n💬 Suggested check-in: {checkin}")
-    
-    # Test exit notification
-    print("\n👋 Testing exit notification:")
-    send_exit_notification(memory, user_id)

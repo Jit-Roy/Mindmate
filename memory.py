@@ -117,7 +117,6 @@ class MemoryManager:
         conv = self.conversations[conversation_id]
         
         # Simple summarization logic (can be enhanced with LLM)
-        topics = set()
         moods = []
         key_points = []
         
@@ -126,15 +125,10 @@ class MemoryManager:
                 # Extract key information
                 if message.emotion_detected:
                     moods.append(message.emotion_detected)
-                
-                # Simple keyword extraction for topics
-                content_lower = message.content.lower()
-                for keyword in config.mental_health_keywords:
-                    if keyword in content_lower:
-                        topics.add(keyword)
         
-        conv.key_topics = list(topics)
-        conv.summary = f"Conversation covered: {', '.join(list(topics)[:5])}. User moods: {', '.join(set(moods[-5:]))}"
+        # Create summary based on emotions and basic message count
+        conv.key_topics = []  # Remove keyword-based topic extraction
+        conv.summary = f"Conversation with {len(conv.messages)} messages. User moods: {', '.join(set(moods[-5:]))}"
         
         # Keep only recent messages and summary
         if len(conv.messages) > config.max_conversation_history:
@@ -237,7 +231,7 @@ class MemoryManager:
             with open(self.memory_file, 'w') as f:
                 json.dump(memory_data, f, indent=2)
         except Exception as e:
-            print(f"Error saving memory: {e}")
+            pass
     
     def load_memory(self):
         """Load conversation memory from file."""
@@ -272,7 +266,7 @@ class MemoryManager:
         except FileNotFoundError:
             self.conversations = {}
         except Exception as e:
-            print(f"Error loading memory: {e}")
+            pass
             self.conversations = {}
     
     def save_profiles(self):
@@ -294,7 +288,7 @@ class MemoryManager:
             with open(self.profiles_file, 'w') as f:
                 json.dump(profiles_data, f, indent=2)
         except Exception as e:
-            print(f"Error saving profiles: {e}")
+            pass
     
     def load_profiles(self):
         """Load user profiles from file."""
@@ -318,5 +312,5 @@ class MemoryManager:
         except FileNotFoundError:
             self.user_profiles = {}
         except Exception as e:
-            print(f"Error loading profiles: {e}")
+            pass
             self.user_profiles = {}

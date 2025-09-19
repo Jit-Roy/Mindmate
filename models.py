@@ -7,10 +7,10 @@ class ImportantEvent(BaseModel):
     """Tracks important upcoming events mentioned in conversation."""
     event_id: str
     user_id: str
-    event_type: str  # 'exam', 'interview', 'appointment', 'date', 'meeting', etc.
+    event_type: str  # 'exam', 'interview', 'appointment'
     description: str  # What the user said about it
     event_date: Optional[date] = None  # When it's happening
-    mentioned_date: datetime = Field(default_factory=datetime.now)  # When they mentioned it
+    mentioned_date: datetime = Field(default_factory=datetime.now)  
     follow_up_needed: bool = True
     follow_up_done: bool = False
 

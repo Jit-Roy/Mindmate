@@ -1,12 +1,12 @@
 import random
 import asyncio
-from datetime import datetime
+from datetime import datetime, date
 from typing import List, Optional
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from models import ChatResponse, UserProfile, ConversationMessage, ImportantEvent
-from memory_manager import MemoryManager
-from mental_health_filter import MentalHealthFilter
+from memory import MemoryManager
+from filter import MentalHealthFilter
 from config import config
 
 
@@ -25,96 +25,82 @@ class MentalHealthChatbot:
         self.health_filter = MentalHealthFilter()
         
         self.system_prompt = self._create_system_prompt()
-        
-        # Daily check-in questions
-        self.check_in_questions = [
-            "Hey bro, how are you feeling today?",
-            "What's on your mind today, friend?",
-            "How did you sleep last night? How's your mood?",
-            "Any particular thoughts or feelings you want to share today?",
-            "What's been the highlight of your day so far?",
-            "How are you taking care of yourself today?",
-            "Is there anything that's been weighing on your mind lately?",
-            "How would you describe your energy level today?",
-            "What's one thing you're grateful for today?",
-            "How are you handling stress these days?"
-        ]
     
     def _create_system_prompt(self) -> str:
         """Create the system prompt that defines the chatbot's personality."""
         return """You are MyBro - a caring, supportive friend who adapts your response style based on what the person needs. Your personality adjusts to match the situation:
 
-⏰ TIME AWARENESS - VERY IMPORTANT:
-- ALWAYS acknowledge when time has passed since your last conversation
-- If they haven't talked in 1+ days, mention it: "Haven't heard from you since yesterday, how are you holding up?"
-- If it's been several days: "Man, it's been 3 days! I was worried about you. How have you been?"
-- Reference time naturally: "Last time we talked..." "Since yesterday..." "A few days ago you mentioned..."
-- If it's the same day: "Earlier today you said..." "A few hours ago..."
-- Use the time context provided to show you care and remember their timeline
+        ⏰ TIME AWARENESS - VERY IMPORTANT:
+        - ALWAYS acknowledge when time has passed since your last conversation
+        - If they haven't talked in 1+ days, mention it: "Haven't heard from you since yesterday, how are you holding up?"
+        - If it's been several days: "Man, it's been 3 days! I was worried about you. How have you been?"
+        - Reference time naturally: "Last time we talked..." "Since yesterday..." "A few days ago you mentioned..."
+        - If it's the same day: "Earlier today you said..." "A few hours ago..."
+        - Use the time context provided to show you care and remember their timeline
 
-🎭 ADAPTIVE RESPONSE LEVELS:
+        🎭 ADAPTIVE RESPONSE LEVELS:
 
-🟢 CASUAL/POSITIVE CONVERSATIONS (when they're sharing good news, casual chat, mild stress):
-- Be a supportive, chill friend 
-- Use encouraging language but don't overreact
-- Ask follow-up questions naturally
-- Match their energy level - if they're casual, be casual
-- Example: "That's awesome, man! How did that make you feel?" "Sounds like you're handling things well"
+        🟢 CASUAL/POSITIVE CONVERSATIONS (when they're sharing good news, casual chat, mild stress):
+        - Be a supportive, chill friend 
+        - Use encouraging language but don't overreact
+        - Ask follow-up questions naturally
+        - Match their energy level - if they're casual, be casual
+        - Example: "That's awesome, man! How did that make you feel?" "Sounds like you're handling things well"
 
-🟡 MILD CONCERN (everyday stress, minor worries, feeling down but not severe):
-- Be more attentive and caring
-- Offer gentle support and encouragement  
-- Ask deeper questions but don't assume crisis
-- Provide perspective and coping suggestions
-- Example: "That sounds tough, bro. Want to talk about what's making you feel this way?"
+        🟡 MILD CONCERN (everyday stress, minor worries, feeling down but not severe):
+        - Be more attentive and caring
+        - Offer gentle support and encouragement  
+        - Ask deeper questions but don't assume crisis
+        - Provide perspective and coping suggestions
+        - Example: "That sounds tough, bro. Want to talk about what's making you feel this way?"
 
-🟠 MODERATE DISTRESS (significant anxiety, depression symptoms, relationship issues):
-- Show more emotional investment
-- Be more direct about caring and support
-- Challenge negative thoughts gently but firmly
-- Remind them of their strengths and support system
-- Example: "Hey, I can tell this is really affecting you. You don't have to go through this alone"
+        🟠 MODERATE DISTRESS (significant anxiety, depression symptoms, relationship issues):
+        - Show more emotional investment
+        - Be more direct about caring and support
+        - Challenge negative thoughts gently but firmly
+        - Remind them of their strengths and support system
+        - Example: "Hey, I can tell this is really affecting you. You don't have to go through this alone"
 
-� CRISIS MODE (suicidal thoughts, severe depression, immediate danger):
-- NOW you become passionate and protective
-- Fight back against harmful thoughts aggressively but lovingly
-- Remind them of people who love them (family, friends, partners)
-- Challenge their negative thoughts directly: "That's not true, bro, and you know it"
-- Be their protector: "I'm not letting you think like that, man"
-- Show urgency about their wellbeing
+        � CRISIS MODE (suicidal thoughts, severe depression, immediate danger):
+        - NOW you become passionate and protective
+        - Fight back against harmful thoughts aggressively but lovingly
+        - Remind them of people who love them (family, friends, partners)
+        - Challenge their negative thoughts directly: "That's not true, bro, and you know it"
+        - Be their protector: "I'm not letting you think like that, man"
+        - Show urgency about their wellbeing
 
-🛡️ CRISIS INTERVENTION EXAMPLES:
-"Bro, STOP. Your mom said that because she's scared and stressed, not because she doesn't love you!"
-"Listen to me - you are NOT going anywhere! Your family needs you, even if they're bad at showing it right now."
-"No way, man! You think your dad sacrificed everything just to lose his son? Hell no!"
+        🛡️ CRISIS INTERVENTION EXAMPLES:
+        "Bro, STOP. Your mom said that because she's scared and stressed, not because she doesn't love you!"
+        "Listen to me - you are NOT going anywhere! Your family needs you, even if they're bad at showing it right now."
+        "No way, man! You think your dad sacrificed everything just to lose his son? Hell no!"
 
-💡 KEY PRINCIPLE: MATCH THE ENERGY AND NEED
-- Don't treat someone sharing good news like they're in crisis
-- Don't treat casual frustration like severe depression  
-- Escalate your intensity only when the situation truly calls for it
-- Be supportive without being overwhelming
+        💡 KEY PRINCIPLE: MATCH THE ENERGY AND NEED
+        - Don't treat someone sharing good news like they're in crisis
+        - Don't treat casual frustration like severe depression  
+        - Escalate your intensity only when the situation truly calls for it
+        - Be supportive without being overwhelming
 
-🤗 CARING CONTEXTUAL QUESTIONS (Ask these AFTER building rapport, not immediately):
-When someone seems stressed/sad/troubled, gradually ask about:
-- Basic care: "Have you been eating okay?" "How's your sleep been lately?"
-- Relationships: "Everything okay with family?" "How are things with your girlfriend/boyfriend?"
-- Life context: "What's been going on at school/work?" "Did something happen with your parents?"
-- Support system: "Do you have friends you can talk to about this?"
+        🤗 CARING CONTEXTUAL QUESTIONS (Ask these AFTER building rapport, not immediately):
+        When someone seems stressed/sad/troubled, gradually ask about:
+        - Basic care: "Have you been eating okay?" "How's your sleep been lately?"
+        - Relationships: "Everything okay with family?" "How are things with your girlfriend/boyfriend?"
+        - Life context: "What's been going on at school/work?" "Did something happen with your parents?"
+        - Support system: "Do you have friends you can talk to about this?"
 
-⏰ TIMING FOR DEEPER QUESTIONS:
-- NEVER ask personal questions in the first 1-2 exchanges
-- Wait until they've shared something emotional or concerning
-- Build on what they tell you naturally
-- If they mention being sad, THEN ask what happened
-- If they seem stressed, THEN explore the source
+        ⏰ TIMING FOR DEEPER QUESTIONS:
+        - NEVER ask personal questions in the first 1-2 exchanges
+        - Wait until they've shared something emotional or concerning
+        - Build on what they tell you naturally
+        - If they mention being sad, THEN ask what happened
+        - If they seem stressed, THEN explore the source
 
-EXAMPLE PROGRESSION:
-User: "I'm feeling really down"
-You: "I'm sorry to hear that, bro. What's been going on?"
-User: [shares more]
-You: "That sounds tough. How have you been sleeping through all this?" OR "Have you talked to anyone close to you about this?"
+        EXAMPLE PROGRESSION:
+        User: "I'm feeling really down"
+        You: "I'm sorry to hear that, bro. What's been going on?"
+        User: [shares more]
+        You: "That sounds tough. How have you been sleeping through all this?" OR "Have you talked to anyone close to you about this?"
 
-Remember: You can be caring and supportive without being aggressive. Save the intense, protective energy for when someone actually needs saving."""
+        Remember: You can be caring and supportive without being aggressive. Save the intense, protective energy for when someone actually needs saving."""
 
     async def chat(self, user_id: str, message: str) -> ChatResponse:
         """Main chat method that processes user input and generates response."""
@@ -126,7 +112,7 @@ Remember: You can be caring and supportive without being aggressive. Save the in
         topic_filter = self.health_filter.is_mental_health_related(message)
         
         if not topic_filter.is_mental_health_related:
-            redirect_response = self.health_filter.get_redirect_response()
+            redirect_response = "Sorry but i can not answer to that question!!!."
             
             # Still save the interaction but with a redirect
             self.memory_manager.add_message(user_id, "user", message)
@@ -172,37 +158,37 @@ Remember: You can be caring and supportive without being aggressive. Save the in
         # Create the prompt with context
         enhanced_prompt = f"""{self.system_prompt}
 
-CONVERSATION CONTEXT:
-{context}
+        CONVERSATION CONTEXT:
+        {context}
 
-{f"PROACTIVE GREETING: You should start your response with this caring follow-up: '{proactive_greeting}'" if proactive_greeting else ""}
+        {f"PROACTIVE GREETING: You should start your response with this caring follow-up: '{proactive_greeting}'" if proactive_greeting else ""}
 
-CURRENT USER STATE:
-- Detected emotion: {emotion}
-- Urgency level: {urgency_level}/5
-- User prefers to be called: {user_profile.preferred_name or 'friend'}
-- Conversation depth: {conversation_depth} messages (deeper conversations allow more personal questions)
+        CURRENT USER STATE:
+        - Detected emotion: {emotion}
+        - Urgency level: {urgency_level}/5
+        - User prefers to be called: {user_profile.preferred_name or 'friend'}
+        - Conversation depth: {conversation_depth} messages (deeper conversations allow more personal questions)
 
-🎯 RESPONSE GUIDANCE BASED ON URGENCY LEVEL:
+        🎯 RESPONSE GUIDANCE BASED ON URGENCY LEVEL:
 
-Level 1-2 (Casual/Mild): Be supportive but relaxed. Don't overreact. Match their energy level.
-Level 3 (Moderate): Show more concern and support. Ask deeper questions but stay calm.
-Level 4-5 (Crisis): NOW use your passionate, protective mode. Fight for them!
+        Level 1-2 (Casual/Mild): Be supportive but relaxed. Don't overreact. Match their energy level.
+        Level 3 (Moderate): Show more concern and support. Ask deeper questions but stay calm.
+        Level 4-5 (Crisis): NOW use your passionate, protective mode. Fight for them!
 
-🤗 CONVERSATION DEPTH GUIDANCE:
-- First 1-2 exchanges: Keep it general, build rapport
-- 3-5 exchanges: Start exploring their situation more
-- 6+ exchanges with emotional content: NOW you can ask about sleep, food, family, relationships naturally
+        🤗 CONVERSATION DEPTH GUIDANCE:
+        - First 1-2 exchanges: Keep it general, build rapport
+        - 3-5 exchanges: Start exploring their situation more
+        - 6+ exchanges with emotional content: NOW you can ask about sleep, food, family, relationships naturally
 
-IMPORTANT: Do not assume crisis or depression unless urgency level is 3+. For levels 1-2, be a normal supportive friend.
+        IMPORTANT: Do not assume crisis or depression unless urgency level is 3+. For levels 1-2, be a normal supportive friend.
 
-Remember to:
-1. Address them by their preferred name
-2. Reference relevant past conversations
-3. Match your tone to their ACTUAL emotional state (don't assume worst case)
-4. Only escalate intensity if urgency level is high
-5. Acknowledge time passed since last conversation if applicable
-6. If there's a proactive greeting above, start with that and then naturally flow into responding to their current message"""
+        Remember to:
+        1. Address them by their preferred name
+        2. Reference relevant past conversations
+        3. Match your tone to their ACTUAL emotional state (don't assume worst case)
+        4. Only escalate intensity if urgency level is high
+        5. Acknowledge time passed since last conversation if applicable
+        6. If there's a proactive greeting above, start with that and then naturally flow into responding to their current message"""
         
         # Build message list for the LLM
         messages = [
@@ -217,8 +203,8 @@ Remember to:
             bot_message = response.content
             
             # Generate follow-up questions and suggestions
-            follow_up_questions = self._generate_follow_up_questions(emotion, urgency_level, user_profile.preferred_name, user_id)
-            suggestions = self._generate_suggestions(emotion, urgency_level)
+            follow_up_questions = self._generate_follow_up_questions(emotion, urgency_level, user_profile.preferred_name, user_id, message)
+            suggestions = self._generate_suggestions(emotion, urgency_level, message, user_profile.preferred_name)
             
             # If we used a proactive greeting, mark relevant events as followed up
             if proactive_greeting:
@@ -246,7 +232,10 @@ Remember to:
             )
             
         except Exception as e:
-            error_message = f"I'm having trouble processing that right now, but I'm here for you. Can you tell me more about how you're feeling?"
+            # Generate contextual error message using LLM
+            error_message = self._generate_error_response_with_llm(message, emotion, urgency_level, user_profile.preferred_name)
+            error_suggestions = self._generate_error_suggestions_with_llm(message, emotion)
+            error_questions = self._generate_error_follow_up_questions_with_llm(user_profile.preferred_name)
             
             # Add user message to memory
             self.memory_manager.add_message(
@@ -261,21 +250,75 @@ Remember to:
             return ChatResponse(
                 message=error_message,
                 emotion_tone="supportive",
-                suggestions=["Try rephrasing your message", "Tell me about your day"],
-                follow_up_questions=["How are you feeling right now?", "What's on your mind?"]
+                suggestions=error_suggestions,
+                follow_up_questions=error_questions
             )
 
     def _handle_crisis_situation(self, message: str, user_name: str) -> ChatResponse:
-        """Handle crisis situations with immediate support and resources."""
+        """Handle crisis situations with immediate support and resources using LLM."""
         name = user_name or "friend"
         
-        crisis_responses = [
-            f"Whoa, {name} - I hear you, and I'm really worried about you right now. What you're going through sounds incredibly painful, but I need you to know that this feeling, as overwhelming as it is, can change.",
-            f"{name}, I'm genuinely scared for you right now, but I also know you're stronger than this moment. You reached out to me, which means part of you is still fighting.",
-            f"Hey {name}, stop right there. I know everything feels impossible right now, but you matter more than you realize, and I'm not going to let you give up."
-        ]
+        # Generate crisis response using LLM
+        crisis_message = self._generate_crisis_response_with_llm(message, name)
         
-        crisis_message = f"""{random.choice(crisis_responses)}
+        # Generate crisis-specific suggestions and follow-up questions
+        suggestions = self._generate_crisis_suggestions_with_llm(message, name)
+        follow_up_questions = self._generate_crisis_follow_up_questions_with_llm(message, name)
+        
+        return ChatResponse(
+            message=crisis_message,
+            emotion_tone="urgent",
+            suggestions=suggestions,
+            follow_up_questions=follow_up_questions
+        )
+
+    def _generate_crisis_response_with_llm(self, message: str, name: str) -> str:
+        """Generate personalized crisis intervention response using LLM."""
+        system_prompt = f"""You are MyBro, a caring friend responding to someone in severe emotional crisis. Generate a compassionate, urgent, but caring crisis intervention response that:
+
+        1. IMMEDIATELY shows deep concern and love for them
+        2. Acknowledges their pain without minimizing it
+        3. Fights against harmful thoughts with protective, loving energy
+        4. Includes essential crisis resources (MUST include these exactly):
+           - Call 988 (Suicide & Crisis Lifeline) - Available 24/7
+           - Text HOME to 741741 (Crisis Text Line)
+           - Call 911 if in immediate danger
+           - Go to nearest emergency room
+        5. Emphasizes their value and that people care about them
+        6. Shows urgency about getting help TODAY
+        7. Uses their name naturally and personally
+
+        TONE GUIDELINES:
+        - Be passionately protective, like fighting for a family member
+        - Show genuine fear for their safety while remaining strong
+        - Be direct and urgent but not clinical
+        - Challenge negative thoughts with love and reality
+        - Make it personal - this is about THEM specifically
+
+        STRUCTURE:
+        - Start with immediate, caring concern that uses their name
+        - Acknowledge their crisis and pain
+        - List the crisis resources clearly (use the exact format above)
+        - End with personal, urgent plea for them to reach out TODAY
+
+        USER CONTEXT:
+        - Name: {name}
+        - Crisis message: "{message}"
+        
+        Generate a powerful, loving crisis intervention response that could save their life."""
+
+        try:
+            messages = [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=f"Generate a crisis intervention response for {name} who said: '{message}'")
+            ]
+            
+            response = self.llm.invoke(messages)
+            return response.content.strip()
+            
+        except Exception as e:
+            # Critical fallback for crisis situations
+            return f"""{name}, I'm genuinely scared for you right now, but I also know you're stronger than this moment. You reached out to me, which means part of you is still fighting.
 
 Listen to me: You're in crisis right now, and that's okay - it happens to the strongest people. But you don't have to face this alone.
 
@@ -285,27 +328,85 @@ Listen to me: You're in crisis right now, and that's okay - it happens to the st
 • **Call 911** if you're in immediate danger
 • **Go to your nearest emergency room**
 
-You can also:
-• Call a trusted friend or family member right now
-• Ask someone to stay with you today
-• Call your doctor or therapist if you have one
-
 {name}, I need you to promise me you'll reach out to one of these resources today. Your life has value, and people care about you more than you know right now."""
-        
-        return ChatResponse(
-            message=crisis_message,
-            emotion_tone="urgent",
-            suggestions=[
+
+    def _generate_crisis_suggestions_with_llm(self, message: str, name: str) -> List[str]:
+        """Generate crisis-specific suggestions using LLM."""
+        system_prompt = f"""Generate 4 immediate, actionable crisis intervention suggestions for someone in severe emotional distress. These should be:
+
+        1. IMMEDIATE safety-focused actions they can take right now
+        2. Specific and actionable (not vague)
+        3. Appropriate for crisis level urgency
+        4. Mix of professional help and personal support
+        5. Focus on TODAY - immediate actions
+
+        USER CONTEXT:
+        - Name: {name}
+        - Crisis situation: "{message}"
+
+        Return exactly 4 suggestions, one per line, without numbering."""
+
+        try:
+            messages = [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=f"Generate crisis suggestions for {name}: '{message}'")
+            ]
+            
+            response = self.llm.invoke(messages)
+            suggestions_text = response.content.strip()
+            
+            suggestions = [s.strip() for s in suggestions_text.split('\n') if s.strip()]
+            return suggestions[:4] if len(suggestions) >= 4 else [
                 "Call 988 Suicide & Crisis Lifeline",
                 "Text HOME to 741741",
                 "Call a trusted friend or family member",
                 "Go to the nearest emergency room"
-            ],
-            follow_up_questions=[
+            ]
+            
+        except Exception as e:
+            return [
+                "Call 988 Suicide & Crisis Lifeline",
+                "Text HOME to 741741", 
+                "Call a trusted friend or family member",
+                "Go to the nearest emergency room"
+            ]
+
+    def _generate_crisis_follow_up_questions_with_llm(self, message: str, name: str) -> List[str]:
+        """Generate crisis-specific follow-up questions using LLM."""
+        system_prompt = f"""Generate 2 caring but urgent follow-up questions for someone in crisis. These should:
+
+        1. Check their immediate safety and support systems
+        2. Encourage immediate action for getting help
+        3. Be personal and caring, using their name
+        4. Focus on RIGHT NOW - immediate needs
+        5. Help assess their current safety situation
+
+        USER CONTEXT:
+        - Name: {name}
+        - Crisis message: "{message}"
+
+        Return exactly 2 questions, one per line."""
+
+        try:
+            messages = [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=f"Generate crisis follow-up questions for {name}: '{message}'")
+            ]
+            
+            response = self.llm.invoke(messages)
+            questions_text = response.content.strip()
+            
+            questions = [q.strip() for q in questions_text.split('\n') if q.strip() and '?' in q]
+            return questions[:2] if len(questions) >= 2 else [
                 "Can you call someone to be with you right now?",
                 "Do you have the 988 number saved in your phone?"
             ]
-        )
+            
+        except Exception as e:
+            return [
+                "Can you call someone to be with you right now?",
+                "Do you have the 988 number saved in your phone?"
+            ]
 
     def _build_conversation_history(self, user_id: str) -> List:
         """Build conversation history for the LLM."""
@@ -321,60 +422,23 @@ You can also:
         return langchain_messages
 
     def _detect_important_events(self, message: str, user_id: str) -> None:
-        """Detect and store important upcoming events from user messages."""
-        message_lower = message.lower()
+        """Detect and store important upcoming events from user messages using LLM."""
         
-        # Event patterns to detect
-        event_patterns = {
-            'exam': ['exam', 'test', 'quiz', 'midterm', 'final'],
-            'interview': ['interview', 'job interview', 'interview tomorrow'],
-            'appointment': ['appointment', 'doctor', 'therapy', 'meeting'],
-            'date': ['date', 'going out', 'date night'],
-            'presentation': ['presentation', 'presenting', 'speech'],
-            'deadline': ['deadline', 'due date', 'assignment due'],
-            'event': ['event', 'party', 'celebration', 'wedding']
-        }
+        # Use LLM to detect events and timing
+        event_detection = self._extract_events_with_llm(message)
         
-        # Time indicators that suggest upcoming events
-        time_indicators = [
-            'tomorrow', 'next week', 'next month', 'in a few days', 
-            'this weekend', 'next monday', 'next tuesday', 'next wednesday',
-            'next thursday', 'next friday', 'next saturday', 'next sunday',
-            'tonight', 'later today', 'this afternoon', 'this evening'
-        ]
-        
-        # Check if message contains both event and time indicators
-        detected_event_type = None
-        for event_type, keywords in event_patterns.items():
-            if any(keyword in message_lower for keyword in keywords):
-                detected_event_type = event_type
-                break
-        
-        has_time_indicator = any(indicator in message_lower for indicator in time_indicators)
-        
-        # If we detect an event with time context, store it
-        if detected_event_type and has_time_indicator:
+        if event_detection and event_detection.get('has_event'):
             from datetime import date, timedelta
             import uuid
             
-            # Estimate event date based on time indicators
-            event_date = None
-            today = date.today()
-            
-            if 'tomorrow' in message_lower:
-                event_date = today + timedelta(days=1)
-            elif 'next week' in message_lower:
-                event_date = today + timedelta(days=7)
-            elif 'tonight' in message_lower or 'later today' in message_lower:
-                event_date = today
-            elif 'this weekend' in message_lower:
-                event_date = today + timedelta(days=(5 - today.weekday()))  # Next Saturday
+            # Calculate event date based on LLM timing analysis
+            event_date = self._parse_event_timing(event_detection.get('timing', ''), message)
             
             # Create and store the event
             event = ImportantEvent(
                 event_id=str(uuid.uuid4()),
                 user_id=user_id,
-                event_type=detected_event_type,
+                event_type=event_detection.get('event_type', 'event'),
                 description=message,
                 event_date=event_date
             )
@@ -384,8 +448,101 @@ You can also:
             user_profile.important_events.append(event)
             self.memory_manager.update_user_profile(user_id, {"important_events": user_profile.important_events})
 
+    def _extract_events_with_llm(self, message: str) -> Optional[dict]:
+        """Use LLM to extract important events and timing from user messages."""
+        system_prompt = """You are an expert at detecting important upcoming events or recent events that someone might want follow-up on. Analyze the user's message and determine:
+
+        1. If there's an important event mentioned (exam, interview, appointment, date, presentation, meeting, deadline, party, etc.)
+        2. The type of event (be specific but use common categories)
+        3. The timing context (when it's happening or happened)
+
+        IMPORTANT: Only detect events that are:
+        - Significant enough that a caring friend would follow up about
+        - Have clear timing indicators (today, tomorrow, next week, yesterday, etc.)
+        - Are specific events, not general activities
+
+        Return your analysis in this EXACT JSON format:
+        {
+            "has_event": true/false,
+            "event_type": "exam" or "interview" or "appointment" or "date" or "presentation" or "meeting" or "deadline" or "party" or "other",
+            "timing": "today" or "tomorrow" or "yesterday" or "next week" or "this weekend" or "next month" or "specific timing phrase",
+            "confidence": 0.0-1.0
+        }
+
+        Only return has_event: true if you're confident (>0.7) there's a real important event with timing."""
+
+        try:
+            messages = [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=f"Analyze this message for important events: '{message}'")
+            ]
+            
+            response = self.llm.invoke(messages)
+            response_text = response.content.strip()
+            
+            # Parse JSON response
+            import json
+            try:
+                # Extract JSON from response if it's wrapped in text
+                if '{' in response_text and '}' in response_text:
+                    start = response_text.find('{')
+                    end = response_text.rfind('}') + 1
+                    json_str = response_text[start:end]
+                    event_data = json.loads(json_str)
+                    
+                    # Validate the response structure
+                    if isinstance(event_data, dict) and 'has_event' in event_data:
+                        confidence = event_data.get('confidence', 0.0)
+                        if event_data.get('has_event') and confidence >= 0.7:
+                            return event_data
+                        
+            except json.JSONDecodeError:
+                pass
+                
+            return None
+            
+        except Exception as e:
+            return None
+
+    def _parse_event_timing(self, timing: str, original_message: str) -> Optional[date]:
+        """Parse timing information to determine event date."""
+        from datetime import date, timedelta
+        
+        today = date.today()
+        timing_lower = timing.lower()
+        message_lower = original_message.lower()
+        
+        # LLM-provided timing
+        if 'tomorrow' in timing_lower:
+            return today + timedelta(days=1)
+        elif 'today' in timing_lower or 'tonight' in timing_lower:
+            return today
+        elif 'yesterday' in timing_lower:
+            return today - timedelta(days=1)
+        elif 'next week' in timing_lower:
+            return today + timedelta(days=7)
+        elif 'this weekend' in timing_lower:
+            return today + timedelta(days=(5 - today.weekday()) if today.weekday() < 5 else 1)
+        elif 'next month' in timing_lower:
+            return today + timedelta(days=30)
+        
+        # Fallback to original message analysis for specific days
+        days_of_week = {
+            'monday': 0, 'tuesday': 1, 'wednesday': 2, 'thursday': 3,
+            'friday': 4, 'saturday': 5, 'sunday': 6
+        }
+        
+        for day_name, day_num in days_of_week.items():
+            if f'next {day_name}' in message_lower:
+                days_ahead = day_num - today.weekday()
+                if days_ahead <= 0:
+                    days_ahead += 7
+                return today + timedelta(days=days_ahead)
+        
+        return None
+
     def _generate_proactive_greeting(self, user_id: str) -> Optional[str]:
-        """Generate a proactive greeting that asks about important events."""
+        """Generate a personalized proactive greeting using LLM for important events."""
         user_profile = self.memory_manager.get_user_profile(user_id)
         name = user_profile.preferred_name or "friend"
         
@@ -396,37 +553,69 @@ You can also:
         # Check for events that need follow-up
         for event in user_profile.important_events:
             if not event.follow_up_done and event.follow_up_needed:
-                # If event was today or yesterday, ask about it
+                # Determine the timing context
+                timing_context = ""
                 if event.event_date == today:
-                    if event.event_type == 'exam':
-                        return f"Hey {name}! How did your exam go today? I remember you were studying for it yesterday."
-                    elif event.event_type == 'interview':
-                        return f"Hey {name}! How did your interview go today? I've been thinking about you!"
-                    elif event.event_type == 'appointment':
-                        return f"Hey {name}! How did your appointment go today? Hope everything went well."
-                    else:
-                        return f"Hey {name}! How did your {event.event_type} go today?"
-                
+                    timing_context = "today"
                 elif event.event_date == yesterday:
-                    if event.event_type == 'exam':
-                        return f"Hey {name}! How did your exam go yesterday? I remember you were preparing for it."
-                    elif event.event_type == 'interview':
-                        return f"Hey {name}! How did your interview go yesterday? I've been wondering how it went!"
-                    elif event.event_type == 'appointment':
-                        return f"Hey {name}! How did your appointment go yesterday? Hope it went smoothly."
-                    else:
-                        return f"Hey {name}! How did your {event.event_type} go yesterday?"
-                
-                # If event is coming up soon, check in
+                    timing_context = "yesterday"
                 elif event.event_date and event.event_date > today and (event.event_date - today).days <= 2:
-                    if event.event_type == 'exam':
-                        return f"Hey {name}! How's the studying going for your exam? It's coming up soon, right?"
-                    elif event.event_type == 'interview':
-                        return f"Hey {name}! How are you feeling about your upcoming interview? Any nerves?"
-                    else:
-                        return f"Hey {name}! How are you feeling about your upcoming {event.event_type}?"
+                    days_until = (event.event_date - today).days
+                    timing_context = f"in {days_until} day{'s' if days_until > 1 else ''}"
+                else:
+                    continue  # Skip events outside our follow-up window
+                
+                # Generate personalized greeting using LLM
+                return self._generate_event_greeting_with_llm(event, name, timing_context)
         
         return None
+
+    def _generate_event_greeting_with_llm(self, event, name: str, timing_context: str) -> str:
+        """Generate a personalized event greeting using LLM."""
+        system_prompt = f"""You are MyBro, a caring friend who remembers important events in people's lives. Generate a warm, personalized greeting that asks about an important event. 
+
+        GUIDELINES:
+        - Be genuinely caring and show you remember the event
+        - Use natural, friendly language like you're texting a close friend
+        - Show appropriate emotion (excitement, concern, encouragement) for the event type
+        - Keep it conversational and warm, not formal
+        - Reference the timing naturally
+        - Make it feel personal and thoughtful
+
+        EVENT CONTEXT:
+        - Person's name: {name}
+        - Event type: {event.event_type}
+        - Timing: {timing_context}
+        - Event description: {event.description if hasattr(event, 'description') else 'Not available'}
+
+        TIMING MEANINGS:
+        - "today": Event happened today, ask how it went
+        - "yesterday": Event happened yesterday, follow up on how it went
+        - "in X days": Event is upcoming, check how they're feeling about it
+
+        Generate ONE natural, caring greeting message that shows you remember and care about their event."""
+
+        try:
+            messages = [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=f"Generate a caring greeting for {name} about their {event.event_type} that happened/happens {timing_context}")
+            ]
+            
+            response = self.llm.invoke(messages)
+            greeting = response.content.strip()
+            
+            # Remove any quotes that might wrap the response
+            if greeting.startswith('"') and greeting.endswith('"'):
+                greeting = greeting[1:-1]
+            
+            return greeting
+            
+        except Exception as e:
+            # Simple fallback if LLM fails
+            if timing_context in ["today", "yesterday"]:
+                return f"Hey {name}! How did your {event.event_type} go {timing_context}?"
+            else:
+                return f"Hey {name}! How are you feeling about your upcoming {event.event_type}?"
 
     def _mark_event_followed_up(self, user_id: str, event_type: str) -> None:
         """Mark events as followed up after asking about them."""
@@ -438,172 +627,239 @@ You can also:
         
         self.memory_manager.update_user_profile(user_id, {"important_events": user_profile.important_events})
 
-    def _generate_follow_up_questions(self, emotion: str, urgency_level: int, user_name: str, user_id: str) -> List[str]:
-        """Generate personalized follow-up questions based on emotion, urgency, and conversation depth."""
+    def _generate_follow_up_questions(self, emotion: str, urgency_level: int, user_name: str, user_id: str, user_message: str = "") -> List[str]:
+        """Generate personalized follow-up questions using LLM based on emotion, urgency, and conversation context."""
         name = user_name or "friend"
         
-        # Check conversation depth to determine if we can ask deeper questions
-        recent_messages = self.memory_manager.get_recent_messages(user_id, 20)
+        # Get conversation context
+        recent_messages = self.memory_manager.get_recent_messages(user_id, 10)
         conversation_depth = len(recent_messages)
         
-        # Check if user has shared emotional content (indicating it's appropriate for deeper questions)
-        emotional_sharing = any(msg.emotion_detected and msg.emotion_detected in ["anxious", "depressed", "angry", "stressed", "lonely", "sad"] 
-                              for msg in recent_messages if hasattr(msg, 'emotion_detected') and msg.emotion_detected)
+        # Build conversation history for context
+        conversation_context = ""
+        if recent_messages:
+            for msg in recent_messages[-5:]:  # Last 5 messages for context
+                role = "User" if msg.role == "user" else "Assistant"
+                conversation_context += f"{role}: {msg.content}\n"
         
-        if urgency_level >= 4:
-            return [
-                f"Do you have people who care about you that you're thinking about, {name}?",
-                f"What would the people who love you want you to remember right now?"
-            ]
-        
-        # For deeper conversations (3+ exchanges) with emotional content, add contextual care questions
-        if conversation_depth >= 6 and emotional_sharing:
-            if emotion in ["depressed", "sad"]:
-                return [
-                    f"Have you been able to eat properly lately, {name}?",
-                    f"How has your sleep been with all this going on?",
-                    f"Is there anything specific that happened? Maybe with family or someone close to you?"
-                ]
-            elif emotion in ["anxious", "stressed"]:
-                return [
-                    f"What's been happening at school/work that's adding to this stress, {name}?",
-                    f"Have you been taking care of yourself through this - eating, sleeping okay?",
-                    f"Is there someone at home or in your circle you can talk to about this?"
-                ]
-            elif emotion == "angry":
-                return [
-                    f"Did something happen with someone you care about, {name}?",
-                    f"How are things at home? Everything okay with your family?",
-                    f"Want to talk about what triggered this anger?"
-                ]
-            elif emotion == "lonely":
-                return [
-                    f"How are things with your friends and family, {name}?",
-                    f"Have you been isolating yourself, or did something happen in your relationships?",
-                    f"When's the last time you had a good conversation with someone close to you?"
-                ]
-        
-        # Standard follow-up questions for early conversation or less emotional sharing
-        if emotion == "anxious":
-            return [
-                f"What's the biggest worry on your mind right now, {name}?",
-                f"How can we break down what's making you anxious into smaller pieces?"
-            ]
-        elif emotion == "depressed":
-            return [
-                f"When did you last feel even a little bit better, {name}?",
-                f"What's been going on that's got you feeling this way?"
-            ]
-        elif emotion == "angry":
-            return [
-                f"What's really driving this anger, {name}?",
-                f"Want to tell me what happened?"
-            ]
-        elif emotion == "lonely":
-            return [
-                f"What's making you feel disconnected right now, {name}?",
-                f"What would help you feel less alone?"
-            ]
-        else:
-            return [
-                f"What's the most important thing on your mind right now, {name}?",
-                f"How can I best support you today?"
-            ]
+        system_prompt = f"""You are a caring mental health companion generating thoughtful follow-up questions. Based on the user's current emotional state, conversation history, and relationship depth, create 2-3 empathetic follow-up questions that:
 
-    def _generate_suggestions(self, emotion: str, urgency_level: int) -> List[str]:
-        """Generate helpful suggestions based on detected emotion and urgency."""
-        
-        if urgency_level >= 4:
-            return [
-                "Talk to someone you trust about these feelings",
-                "Consider calling a mental health helpline",
-                "Focus on one small reason to keep going today"
-            ]
-        elif emotion == "anxious":
-            return [
-                "Try the 4-7-8 breathing technique (breathe in 4, hold 7, out 8)",
-                "Write down your worries and rate them 1-10",
-                "Go for a 10-minute walk or do light stretching"
-            ]
-        elif emotion == "depressed":
-            return [
-                "Do one tiny thing that used to bring you joy",
-                "Reach out to one person who cares about you",
-                "Get some sunlight, even just sitting by a window"
-            ]
-        elif emotion == "angry":
-            return [
-                "Try intense physical exercise to release the energy",
-                "Write out your feelings without censoring yourself",
-                "Practice progressive muscle relaxation"
-            ]
-        elif emotion == "lonely":
-            return [
-                "Call or text someone you haven't spoken to in a while",
-                "Join an online community or local group",
-                "Volunteer for a cause you care about"
-            ]
-        else:
-            return [
-                "Practice mindfulness or meditation for 5 minutes",
-                "Journal about your thoughts and feelings",
-                "Do something kind for yourself or someone else"
-            ]
+        1. Show genuine care and interest in their situation
+        2. Are appropriate for their emotional state and urgency level
+        3. Consider the conversation depth and intimacy level
+        4. Help them explore their feelings or situation deeper
+        5. Feel natural and conversational, not clinical
 
-    def get_daily_checkin(self, user_id: str) -> str:
-        """Get a personalized daily check-in message."""
-        user_profile = self.memory_manager.get_user_profile(user_id)
-        name = user_profile.preferred_name or "friend"
-        
-        # Check if it's time for a check-in
-        if not self.memory_manager.should_check_in(user_id):
-            return None
-        
-        # Get a random check-in question
-        base_question = random.choice(self.check_in_questions)
-        
-        # Personalize it
-        personalized_question = base_question.replace("friend", name).replace("bro", name)
-        
-        return f"Hey {name}! Daily check-in time 🌟\n\n{personalized_question}"
+        CONTEXT:
+        - User's name: {name}
+        - Current emotion: {emotion}
+        - Urgency level: {urgency_level}/5 (1=casual, 2=mild concern, 3=moderate distress, 4=high distress, 5=crisis)
+        - Conversation depth: {conversation_depth} messages exchanged
 
-    async def process_command(self, user_id: str, command: str) -> str:
-        """Process special commands like help, profile setup, etc."""
-        command = command.lower().strip()
-        
-        if command == "help":
-            return """🤗 **MyBro Commands**
+        CONVERSATION GUIDELINES BY URGENCY:
+        - Level 1-2: Casual, supportive questions that show interest
+        - Level 3: More caring questions about their well-being and situation
+        - Level 4-5: Questions focused on safety, support systems, and immediate needs
+
+        CONVERSATION DEPTH GUIDELINES:
+        - Early conversation (1-3 messages): General, rapport-building questions
+        - Developing relationship (4-10 messages): More personal but still gentle questions  
+        - Deeper relationship (10+ messages): Can ask about family, relationships, self-care naturally
+
+        QUESTION STYLE:
+        - Use {name} naturally in questions when appropriate
+        - Be conversational, not interrogating
+        - Mix emotional support with practical exploration
+        - Show you remember and care about their situation
+
+        Recent conversation context:
+        {conversation_context}
+
+        Return 1/2/3 thoughtful follow-up questions in a paragraph without numbering or bullet points."""
+
+        try:
+            messages = [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=f"Current user message: '{user_message}' | Generate empathetic follow-up questions for someone feeling {emotion} at urgency level {urgency_level}/5.")
+            ]
             
-**Basic Commands:**
-• `help` - Show this help message
-• `profile` - Set up or update your profile
-• `checkin` - Get a daily mental health check-in
-• `clear` - Clear conversation history
-• `quit` or `exit` - End conversation
-
-**Just talk to me naturally about:**
-• How you're feeling
-• What's on your mind
-• Anything that's bothering you
-• Your mental health and emotions
-
-I'm here to listen and support you like a caring older brother would! 💙"""
-        
-        elif command == "checkin":
-            checkin_message = self.get_daily_checkin(user_id)
-            if checkin_message:
-                return checkin_message
+            response = self.llm.invoke(messages)
+            questions_text = response.content.strip()
+            
+            # Split into individual questions and clean them
+            questions = [
+                question.strip() 
+                for question in questions_text.split('\n') 
+                if question.strip() and '?' in question
+            ]
+            
+            # Ensure we have 2-3 questions
+            if len(questions) >= 2:
+                return questions[:3]  # Return max 3 questions
             else:
-                user_profile = self.memory_manager.get_user_profile(user_id)
-                name = user_profile.preferred_name or "friend"
-                return f"Hey {name}! We just talked recently, but I'm always here. How are you feeling right now?"
+                # Return empty list if LLM response is inadequate
+                return []
+                
+        except Exception as e:
+            pass
+
+    def _generate_suggestions(self, emotion: str, urgency_level: int, user_message: str = "", user_name: str = "friend") -> List[str]:
+        """Generate helpful suggestions using LLM based on detected emotion, urgency, and context."""
         
-        elif command == "clear":
-            # Clear conversation history but keep profile
-            self.memory_manager.create_conversation(user_id)
-            user_profile = self.memory_manager.get_user_profile(user_id)
-            name = user_profile.preferred_name or "friend"
-            return f"Got it, {name}! Fresh start. What's on your mind today?"
+        system_prompt = f"""You are a mental health support assistant generating personalized coping suggestions. Based on the user's emotional state and situation, provide 3 practical, actionable suggestions that are:
+
+        1. Immediately helpful for their current emotional state
+        2. Appropriate for their urgency level (1-5 scale)
+        3. Realistic and achievable in the next few hours
+        4. Supportive without being overwhelming
+
+        CONTEXT:
+        - User's emotion: {emotion}
+        - Urgency level: {urgency_level}/5 (1=casual, 2=mild concern, 3=moderate distress, 4=high distress, 5=crisis)
+        - User's name: {user_name}
+
+        URGENCY GUIDELINES:
+        - Level 1-2: Gentle self-care and wellness suggestions
+        - Level 3: More focused coping strategies and support-seeking
+        - Level 4-5: Immediate safety measures and professional help
+
+        SUGGESTION RULES:
+        - Each suggestion should be 1-2 sentences max
+        - Be specific and actionable ("Call your best friend" not "reach out to someone")
+        - Match the urgency level appropriately
+        - Consider their emotional state (anxious needs different help than depressed)
+        - Avoid generic advice - make it feel personal
+
+        Return EXACTLY 3 suggestions, one per line, without numbering or bullet points."""
+
+        try:
+            messages = [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=f"User's emotional state: {emotion} (urgency {urgency_level}/5). Generate 3 personalized suggestions for immediate support. User message context: '{user_message}'")
+            ]
+            
+            response = self.llm.invoke(messages)
+            suggestions_text = response.content.strip()
+            
+            # Split into individual suggestions and clean them
+            suggestions = [
+                suggestion.strip() 
+                for suggestion in suggestions_text.split('\n') 
+                if suggestion.strip()
+            ]
+            
+            # Ensure we have exactly 3 suggestions
+            if len(suggestions) >= 3:
+                return suggestions[:3]
+            else:
+                # Return empty list if LLM response is inadequate
+                return []
+                
+        except Exception as e:
+            return []
+
+    def _generate_error_response_with_llm(self, message: str, emotion: str, urgency_level: int, user_name: str) -> str:
+        """Generate contextual error response using LLM."""
+        name = user_name or "friend"
         
-        else:
-            return "I didn't recognize that command. Type `help` to see available commands, or just talk to me about how you're feeling!"
+        system_prompt = f"""You are MyBro, a caring friend who just experienced a technical issue while trying to respond. Generate a warm, apologetic message that:
+
+        1. Acknowledges you're having technical trouble
+        2. Shows you still care and are present for them
+        3. Reassures them this doesn't diminish your support
+        4. Gently encourages them to continue sharing
+        5. Matches the appropriate tone for their emotional state
+
+        CONTEXT:
+        - User's name: {name}
+        - Their emotional state: {emotion}
+        - Urgency level: {urgency_level}/5
+        - What they said: "{message}"
+
+        TONE GUIDELINES:
+        - If urgency is high (4-5): Show extra concern and urgency about staying connected
+        - If urgency is moderate (3): Be caring and reassuring about technical issues
+        - If urgency is low (1-2): Be friendly and casual about the hiccup
+
+        Keep it personal, warm, and focused on maintaining the supportive connection despite technical issues."""
+
+        try:
+            messages = [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=f"Generate an error response for {name} who is feeling {emotion} (urgency {urgency_level}/5)")
+            ]
+            
+            response = self.llm.invoke(messages)
+            return response.content.strip()
+            
+        except:
+            # Critical fallback for error situations
+            return f"I'm having trouble processing that right now, {name}, but I'm still here for you. Can you tell me more about how you're feeling?"
+
+    def _generate_error_suggestions_with_llm(self, message: str, emotion: str) -> List[str]:
+        """Generate helpful suggestions for when there's a technical error."""
+        system_prompt = f"""Generate 3 helpful suggestions for someone when you've experienced a technical issue. These should:
+
+        1. Help them continue the conversation despite the technical problem
+        2. Be encouraging and supportive
+        3. Suggest alternative ways to express themselves
+        4. Be appropriate for their emotional state: {emotion}
+
+        Return exactly 3 suggestions, one per line, without numbering."""
+
+        try:
+            messages = [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=f"Generate error recovery suggestions for someone feeling {emotion} who said: '{message}'")
+            ]
+            
+            response = self.llm.invoke(messages)
+            suggestions_text = response.content.strip()
+            
+            suggestions = [s.strip() for s in suggestions_text.split('\n') if s.strip()]
+            return suggestions[:3] if len(suggestions) >= 3 else [
+                "Try rephrasing your message",
+                "Tell me about your day", 
+                "Share what's on your mind right now"
+            ]
+            
+        except:
+            return [
+                "Try rephrasing your message",
+                "Tell me about your day",
+                "Share what's on your mind right now"
+            ]
+
+    def _generate_error_follow_up_questions_with_llm(self, user_name: str) -> List[str]:
+        """Generate follow-up questions for error situations."""
+        name = user_name or "friend"
+        
+        system_prompt = f"""Generate 2 caring follow-up questions for when you've had a technical issue. These should:
+
+        1. Show continued care and interest
+        2. Help restart the conversation smoothly
+        3. Be warm and encouraging
+        4. Use their name naturally: {name}
+
+        Return exactly 2 questions, one per line."""
+
+        try:
+            messages = [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=f"Generate error recovery questions for {name}")
+            ]
+            
+            response = self.llm.invoke(messages)
+            questions_text = response.content.strip()
+            
+            questions = [q.strip() for q in questions_text.split('\n') if q.strip() and '?' in q]
+            return questions[:2] if len(questions) >= 2 else [
+                "How are you feeling right now?",
+                "What's been on your mind today?"
+            ]
+            
+        except:
+            return [
+                "How are you feeling right now?",
+                "What's been on your mind today?"
+            ]
