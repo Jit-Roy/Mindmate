@@ -1,79 +1,99 @@
 import json
 import asyncio
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 from models import ConversationMemory, ConversationMessage, UserProfile
 from config import config
+from firebase_manager import firebase_manager
 
 
 class MemoryManager:
-    """Manages conversation memory, user profiles, and chat history."""
+    """Manages conversation memory, user profiles, and chat history using Firebase."""
     
     def __init__(self):
+        # Firebase-first approach - no local storage
         self.conversations: Dict[str, ConversationMemory] = {}
         self.user_profiles: Dict[str, UserProfile] = {}
-        self.memory_file = "conversation_memory.json"
-        self.profiles_file = "user_profiles.json"
-        self.load_memory()
-        self.load_profiles()
     
-    def create_user_profile(self, user_id: str, name: str = None) -> UserProfile:
+    def create_user_profile(self, email: str, name: str = None) -> UserProfile:
         """Create a new user profile."""
-        profile = UserProfile(
-            user_id=user_id,
-            name=name,
-            preferred_name=name or "friend"
-        )
-        self.user_profiles[user_id] = profile
-        self.save_profiles()
+        # Create in Firebase only
+        profile = firebase_manager.create_user_profile(email, name, name)
+        
+        # Cache locally for performance
+        self.user_profiles[email] = profile
         return profile
     
-    def get_user_profile(self, user_id: str) -> UserProfile:
-        """Get user profile or create if doesn't exist."""
-        if user_id not in self.user_profiles:
-            return self.create_user_profile(user_id)
-        return self.user_profiles[user_id]
+    def get_user_profile(self, email: str) -> UserProfile:
+        """Get user profile from Firebase with correct lastInteraction."""
+        # Get from the standard location first
+        profile = firebase_manager.get_user_profile(email)
+        
+        # Try to get lastInteraction from profiles table
+        try:
+            user_key = email.replace('.', '_').replace('@', '_at_')
+            profiles_data = firebase_manager.db_ref.child("profiles").child(user_key).get()
+            
+            if profiles_data and 'lastInteraction' in profiles_data:
+                from datetime import datetime
+                last_interaction_str = profiles_data['lastInteraction']
+                profile.last_interaction = datetime.fromisoformat(last_interaction_str)
+            
+        except Exception as e:
+            # Silently handle lastInteraction read errors - not critical for functionality
+            pass
+        
+        # Cache locally for performance
+        self.user_profiles[email] = profile
+        return profile
     
     def get_all_user_profiles(self) -> Dict[str, UserProfile]:
-        """Get all user profiles."""
-        return self.user_profiles.copy()
+        """Get all user profiles from Firebase."""
+        return firebase_manager.get_all_user_profiles()
     
     def find_user_by_name(self, name: str) -> UserProfile:
         """Find user profile by name (case insensitive)."""
-        name_lower = name.lower()
-        for profile in self.user_profiles.values():
-            if (profile.name and profile.name.lower() == name_lower) or \
-               (profile.preferred_name and profile.preferred_name.lower() == name_lower):
-                return profile
-        return None
+        return firebase_manager.find_user_by_name(name)
     
-    def update_user_profile(self, user_id: str, updates: Dict[str, Any]):
+    def update_user_profile(self, email: str, updates: Dict[str, Any]):
         """Update user profile information."""
-        if user_id in self.user_profiles:
-            profile = self.user_profiles[user_id]
+        # Update in Firebase only
+        firebase_manager.update_user_profile(email, updates)
+        
+        # Update local cache if exists
+        if email in self.user_profiles:
+            profile = self.user_profiles[email]
             for key, value in updates.items():
                 if hasattr(profile, key):
                     setattr(profile, key, value)
             profile.last_interaction = datetime.now()
-            self.save_profiles()
     
-    def create_conversation(self, user_id: str) -> ConversationMemory:
+    def create_conversation(self, email: str) -> ConversationMemory:
         """Create a new conversation memory."""
-        conversation_id = f"{user_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        conversation_id = f"{email}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         conversation = ConversationMemory(
             conversation_id=conversation_id,
-            user_id=user_id
+            user_id=email
         )
         self.conversations[conversation_id] = conversation
         return conversation
     
-    def add_message(self, user_id: str, role: str, content: str, 
+    def add_message(self, email: str, role: str, content: str, 
                    emotion_detected: str = None, urgency_level: int = 1) -> ConversationMemory:
         """Add a message to the conversation."""
-        # Get or create current conversation
-        current_conv = self.get_current_conversation(user_id)
+        # Add to Firebase only
+        firebase_manager.add_message(email, role, content, emotion_detected, urgency_level)
+        
+        # For local cache, create a simple conversation object
+        # This is just for immediate access, real data comes from Firebase
+        current_conv = self.get_current_conversation(email)
         if not current_conv:
-            current_conv = self.create_conversation(user_id)
+            conversation_id = f"conv_{email}_{datetime.now().strftime('%Y%m%d')}"
+            current_conv = ConversationMemory(
+                conversation_id=conversation_id,
+                user_id=email
+            )
+            self.conversations[conversation_id] = current_conv
         
         message = ConversationMessage(
             role=role,
@@ -85,29 +105,40 @@ class MemoryManager:
         current_conv.messages.append(message)
         current_conv.updated_at = datetime.now()
         
-        # Trigger summarization if conversation is getting long
-        if len(current_conv.messages) >= config.summary_trigger_length:
-            self.summarize_conversation(current_conv.conversation_id)
-        
-        self.save_memory()
         return current_conv
     
-    def get_current_conversation(self, user_id: str) -> ConversationMemory:
+    def get_current_conversation(self, email: str) -> ConversationMemory:
         """Get the most recent conversation for a user."""
         user_conversations = [
             conv for conv in self.conversations.values() 
-            if conv.user_id == user_id
+            if conv.user_id == email
         ]
         if user_conversations:
             return max(user_conversations, key=lambda x: x.updated_at)
         return None
     
-    def get_recent_messages(self, user_id: str, limit: int = 10) -> List[ConversationMessage]:
-        """Get recent messages for context."""
-        current_conv = self.get_current_conversation(user_id)
-        if current_conv:
-            return current_conv.messages[-limit:]
-        return []
+    def get_recent_messages(self, email: str, limit: int = 10) -> List[ConversationMessage]:
+        """Get recent messages for context from Firebase."""
+        # Get recent messages directly from Firebase
+        messages_data = firebase_manager.get_recent_messages(email, limit)
+        
+        # Convert dictionaries to ConversationMessage objects
+        messages = []
+        for msg_data in messages_data:
+            try:
+                message = ConversationMessage(
+                    role=msg_data.get('role', 'user'),
+                    content=msg_data.get('content', ''),
+                    timestamp=datetime.fromisoformat(msg_data['timestamp']) if msg_data.get('timestamp') else datetime.now(),
+                    emotion_detected=msg_data.get('emotion_detected'),
+                    urgency_level=msg_data.get('urgency_level', 1)
+                )
+                messages.append(message)
+            except Exception as e:
+                # Skip invalid messages silently
+                continue
+        
+        return messages
     
     def summarize_conversation(self, conversation_id: str):
         """Create a summary of the conversation to manage memory."""
@@ -136,16 +167,16 @@ class MemoryManager:
         
         self.save_memory()
     
-    def get_conversation_context(self, user_id: str) -> str:
+    def get_conversation_context(self, email: str) -> str:
         """Get formatted conversation context for the LLM including temporal awareness."""
-        profile = self.get_user_profile(user_id)
-        recent_messages = self.get_recent_messages(user_id, 5)
-        current_conv = self.get_current_conversation(user_id)
+        profile = self.get_user_profile(email)
+        recent_messages = self.get_recent_messages(email, 5)
+        current_conv = self.get_current_conversation(email)
         
         now = datetime.now()
         
         # Start with user profile and temporal context
-        context = f"User Profile: {profile.preferred_name or 'friend'}"
+        context = f"User Profile: {profile.display_name or 'friend'}"
         
         # Add temporal awareness about user's interaction patterns
         if profile.last_interaction:
@@ -156,6 +187,15 @@ class MemoryManager:
                     context += " (yesterday)"
                 elif time_since_last.days >= 3:
                     context += f" - user has been away for {time_since_last.days} days"
+                
+                # Only include summary on first chat of the day
+                if self._is_first_chat_of_day(email):
+                    last_summary = self._get_last_conversation_summary(email)
+                    if last_summary:
+                        summary_date = last_summary.get('date', 'unknown')
+                        summary_text = last_summary.get('summary_text', '')
+                        context += f"\n📋 Last conversation summary ({summary_date}): {summary_text}"
+                    
             elif time_since_last.seconds > 3600:
                 hours_ago = time_since_last.seconds // 3600
                 context += f"\n⏰ TIME CONTEXT: Last conversation was {hours_ago} hour(s) ago"
@@ -197,120 +237,39 @@ class MemoryManager:
             return f"{minutes}m ago"
         else:
             return "just now"
-    
-    def should_check_in(self, user_id: str) -> bool:
-        """Determine if it's time for a daily check-in."""
-        profile = self.get_user_profile(user_id)
-        time_since_last = datetime.now() - profile.last_interaction
-        return time_since_last.days >= 1
-    
-    def save_memory(self):
-        """Save conversation memory to file."""
+
+    def _is_first_chat_of_day(self, email: str) -> bool:
+        """Check if this is the first chat of the current day."""
         try:
-            memory_data = {
-                conv_id: {
-                    "conversation_id": conv.conversation_id,
-                    "user_id": conv.user_id,
-                    "messages": [
-                        {
-                            "role": msg.role,
-                            "content": msg.content,
-                            "timestamp": msg.timestamp.isoformat(),
-                            "emotion_detected": msg.emotion_detected,
-                            "urgency_level": msg.urgency_level
-                        } for msg in conv.messages
-                    ],
-                    "summary": conv.summary,
-                    "key_topics": conv.key_topics,
-                    "important_details": conv.important_details,
-                    "created_at": conv.created_at.isoformat(),
-                    "updated_at": conv.updated_at.isoformat()
-                } for conv_id, conv in self.conversations.items()
-            }
+            # Get today's conversation data
+            today_str = datetime.now().strftime('%Y%m%d')
+            today_conv = firebase_manager.get_conversation_by_date(email, today_str)
             
-            with open(self.memory_file, 'w') as f:
-                json.dump(memory_data, f, indent=2)
-        except Exception as e:
-            pass
-    
-    def load_memory(self):
-        """Load conversation memory from file."""
-        try:
-            with open(self.memory_file, 'r') as f:
-                memory_data = json.load(f)
-            
-            for conv_id, data in memory_data.items():
-                messages = []
-                for msg_data in data.get("messages", []):
-                    message = ConversationMessage(
-                        role=msg_data["role"],
-                        content=msg_data["content"],
-                        timestamp=datetime.fromisoformat(msg_data["timestamp"]),
-                        emotion_detected=msg_data.get("emotion_detected"),
-                        urgency_level=msg_data.get("urgency_level", 1)
-                    )
-                    messages.append(message)
+            # If no messages exist for today, this is the first chat
+            if not today_conv or not today_conv.get('messages'):
+                return True
                 
-                conv = ConversationMemory(
-                    conversation_id=data["conversation_id"],
-                    user_id=data["user_id"],
-                    messages=messages,
-                    summary=data.get("summary", ""),
-                    key_topics=data.get("key_topics", []),
-                    important_details=data.get("important_details", {}),
-                    created_at=datetime.fromisoformat(data["created_at"]),
-                    updated_at=datetime.fromisoformat(data["updated_at"])
-                )
-                self.conversations[conv_id] = conv
-                
-        except FileNotFoundError:
-            self.conversations = {}
-        except Exception as e:
-            pass
-            self.conversations = {}
-    
-    def save_profiles(self):
-        """Save user profiles to file."""
-        try:
-            profiles_data = {
-                user_id: {
-                    "user_id": profile.user_id,
-                    "name": profile.name,
-                    "age": profile.age,
-                    "preferred_name": profile.preferred_name,
-                    "mental_health_concerns": profile.mental_health_concerns,
-                    "support_preferences": profile.support_preferences,
-                    "created_at": profile.created_at.isoformat(),
-                    "last_interaction": profile.last_interaction.isoformat()
-                } for user_id, profile in self.user_profiles.items()
-            }
+            # If messages exist, this is not the first chat
+            return False
             
-            with open(self.profiles_file, 'w') as f:
-                json.dump(profiles_data, f, indent=2)
-        except Exception as e:
-            pass
-    
-    def load_profiles(self):
-        """Load user profiles from file."""
-        try:
-            with open(self.profiles_file, 'r') as f:
-                profiles_data = json.load(f)
+        except Exception:
+            # If we can't determine, assume it's not the first chat to be safe
+            return False
+
+    def _get_last_conversation_summary(self, email: str) -> Optional[dict]:
+        """Get the summary of user's last conversation day if it exists."""
+        # Find the last day user actually had conversations (not just when they were online)
+        last_conversation_date = firebase_manager.get_last_conversation_date(email)
+        
+        if last_conversation_date:
+            today_date = datetime.now().date()
             
-            for user_id, data in profiles_data.items():
-                profile = UserProfile(
-                    user_id=data["user_id"],
-                    name=data.get("name"),
-                    age=data.get("age"),
-                    preferred_name=data.get("preferred_name"),
-                    mental_health_concerns=data.get("mental_health_concerns", []),
-                    support_preferences=data.get("support_preferences", []),
-                    created_at=datetime.fromisoformat(data["created_at"]),
-                    last_interaction=datetime.fromisoformat(data["last_interaction"])
-                )
-                self.user_profiles[user_id] = profile
-                
-        except FileNotFoundError:
-            self.user_profiles = {}
-        except Exception as e:
-            pass
-            self.user_profiles = {}
+            # Only get summary if it's not today (today's conversation is ongoing)
+            if last_conversation_date != today_date:
+                date_str = last_conversation_date.strftime('%Y%m%d')
+                return firebase_manager.get_daily_summary(email, date_str)
+        
+        return None
+
+# Global memory manager instance
+memory_manager = MemoryManager()

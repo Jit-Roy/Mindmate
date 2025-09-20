@@ -102,11 +102,11 @@ class MentalHealthChatbot:
 
         Remember: You can be caring and supportive without being aggressive. Save the intense, protective energy for when someone actually needs saving."""
 
-    async def chat(self, user_id: str, message: str) -> ChatResponse:
+    async def chat(self, email: str, message: str) -> ChatResponse:
         """Main chat method that processes user input and generates response."""
         
         # Check if we should generate a proactive greeting first
-        proactive_greeting = self._generate_proactive_greeting(user_id)
+        proactive_greeting = self._generate_proactive_greeting(email)
         
         # Check if message is mental health related
         topic_filter = self.health_filter.is_mental_health_related(message)
@@ -115,8 +115,8 @@ class MentalHealthChatbot:
             redirect_response = "Sorry but i can not answer to that question!!!."
             
             # Still save the interaction but with a redirect
-            self.memory_manager.add_message(user_id, "user", message)
-            self.memory_manager.add_message(user_id, "assistant", redirect_response)
+            self.memory_manager.add_message(email, "user", message)
+            self.memory_manager.add_message(email, "assistant", redirect_response)
             
             return ChatResponse(
                 message=redirect_response,
@@ -129,30 +129,30 @@ class MentalHealthChatbot:
         emotion, urgency_level = self.health_filter.detect_emotion(message)
         
         # Detect and store important events
-        self._detect_important_events(message, user_id)
+        self._detect_important_events(message, email)
         
         # Get conversation context BEFORE adding the current message
-        context = self.memory_manager.get_conversation_context(user_id)
-        user_profile = self.memory_manager.get_user_profile(user_id)
+        context = self.memory_manager.get_conversation_context(email)
+        user_profile = self.memory_manager.get_user_profile(email)
         
         # Check if this is a crisis situation - only trigger for urgency level 5 (extreme)
         if urgency_level >= 5:
-            crisis_response = self._handle_crisis_situation(message, user_profile.preferred_name)
+            crisis_response = self._handle_crisis_situation(message, user_profile.name)
             
             # Add user message to memory
             self.memory_manager.add_message(
-                user_id, "user", message, 
+                email, "user", message, 
                 emotion_detected=emotion, 
                 urgency_level=urgency_level
             )
             
             # Add crisis response to memory
-            self.memory_manager.add_message(user_id, "assistant", crisis_response.message)
+            self.memory_manager.add_message(email, "assistant", crisis_response.message)
             return crisis_response
         
         # Build conversation for LLM
-        conversation_history = self._build_conversation_history(user_id)
-        recent_messages = self.memory_manager.get_recent_messages(user_id, 20)
+        conversation_history = self._build_conversation_history(email)
+        recent_messages = self.memory_manager.get_recent_messages(email, 20)
         conversation_depth = len(recent_messages)
         
         # Create the prompt with context
@@ -166,7 +166,7 @@ class MentalHealthChatbot:
         CURRENT USER STATE:
         - Detected emotion: {emotion}
         - Urgency level: {urgency_level}/5
-        - User prefers to be called: {user_profile.preferred_name or 'friend'}
+        - User prefers to be called: {user_profile.name}
         - Conversation depth: {conversation_depth} messages (deeper conversations allow more personal questions)
 
         🎯 RESPONSE GUIDANCE BASED ON URGENCY LEVEL:
@@ -203,26 +203,26 @@ class MentalHealthChatbot:
             bot_message = response.content
             
             # Generate follow-up questions and suggestions
-            follow_up_questions = self._generate_follow_up_questions(emotion, urgency_level, user_profile.preferred_name, user_id, message)
-            suggestions = self._generate_suggestions(emotion, urgency_level, message, user_profile.preferred_name)
+            follow_up_questions = self._generate_follow_up_questions(emotion, urgency_level, user_profile.name, email, message)
+            suggestions = self._generate_suggestions(emotion, urgency_level, message, user_profile.name)
             
             # If we used a proactive greeting, mark relevant events as followed up
             if proactive_greeting:
                 # Extract event type from greeting to mark as followed up
                 for event_type in ['exam', 'interview', 'appointment']:
                     if event_type in proactive_greeting.lower():
-                        self._mark_event_followed_up(user_id, event_type)
+                        self._mark_event_followed_up(email, event_type)
                         break
             
             # Add user message to memory first
             self.memory_manager.add_message(
-                user_id, "user", message, 
+                email, "user", message, 
                 emotion_detected=emotion, 
                 urgency_level=urgency_level
             )
             
             # Add assistant response to memory
-            self.memory_manager.add_message(user_id, "assistant", bot_message)
+            self.memory_manager.add_message(email, "assistant", bot_message)
             
             return ChatResponse(
                 message=bot_message,
@@ -233,19 +233,19 @@ class MentalHealthChatbot:
             
         except Exception as e:
             # Generate contextual error message using LLM
-            error_message = self._generate_error_response_with_llm(message, emotion, urgency_level, user_profile.preferred_name)
+            error_message = self._generate_error_response_with_llm(message, emotion, urgency_level, user_profile.name)
             error_suggestions = self._generate_error_suggestions_with_llm(message, emotion)
-            error_questions = self._generate_error_follow_up_questions_with_llm(user_profile.preferred_name)
+            error_questions = self._generate_error_follow_up_questions_with_llm(user_profile.name)
             
             # Add user message to memory
             self.memory_manager.add_message(
-                user_id, "user", message, 
+                email, "user", message, 
                 emotion_detected=emotion, 
                 urgency_level=urgency_level
             )
             
             # Add error response to memory
-            self.memory_manager.add_message(user_id, "assistant", error_message)
+            self.memory_manager.add_message(email, "assistant", error_message)
             
             return ChatResponse(
                 message=error_message,
@@ -408,9 +408,9 @@ Listen to me: You're in crisis right now, and that's okay - it happens to the st
                 "Do you have the 988 number saved in your phone?"
             ]
 
-    def _build_conversation_history(self, user_id: str) -> List:
+    def _build_conversation_history(self, email: str) -> List:
         """Build conversation history for the LLM."""
-        recent_messages = self.memory_manager.get_recent_messages(user_id, 10)
+        recent_messages = self.memory_manager.get_recent_messages(email, 10)
         
         langchain_messages = []
         for msg in recent_messages:
@@ -421,7 +421,7 @@ Listen to me: You're in crisis right now, and that's okay - it happens to the st
         
         return langchain_messages
 
-    def _detect_important_events(self, message: str, user_id: str) -> None:
+    def _detect_important_events(self, message: str, email: str) -> None:
         """Detect and store important upcoming events from user messages using LLM."""
         
         # Use LLM to detect events and timing
@@ -437,17 +437,17 @@ Listen to me: You're in crisis right now, and that's okay - it happens to the st
             # Create and store the event
             event = ImportantEvent(
                 event_id=str(uuid.uuid4()),
-                user_id=user_id,
+                user_id=email,
                 event_type=event_detection.get('event_type', 'event'),
                 description=message,
                 event_date=event_date
             )
             
-            # Add to user profile
-            user_profile = self.memory_manager.get_user_profile(user_id)
-            user_profile.important_events.append(event)
-            self.memory_manager.update_user_profile(user_id, {"important_events": user_profile.important_events})
-
+            # Store event directly in Firebase events table
+            from firebase_manager import firebase_manager
+            firebase_manager.add_important_event(email, event)
+            # Event detected and stored successfully
+            
     def _extract_events_with_llm(self, message: str) -> Optional[dict]:
         """Use LLM to extract important events and timing from user messages."""
         system_prompt = """You are an expert at detecting important upcoming events or recent events that someone might want follow-up on. Analyze the user's message and determine:
@@ -541,32 +541,52 @@ Listen to me: You're in crisis right now, and that's okay - it happens to the st
         
         return None
 
-    def _generate_proactive_greeting(self, user_id: str) -> Optional[str]:
+    def _generate_proactive_greeting(self, email: str) -> Optional[str]:
         """Generate a personalized proactive greeting using LLM for important events."""
-        user_profile = self.memory_manager.get_user_profile(user_id)
-        name = user_profile.preferred_name or "friend"
+        user_profile = self.memory_manager.get_user_profile(email)
+        name = user_profile.name or "friend"
         
         from datetime import date, timedelta
+        from firebase_manager import firebase_manager
         today = date.today()
         yesterday = today - timedelta(days=1)
         
-        # Check for events that need follow-up
-        for event in user_profile.important_events:
-            if not event.follow_up_done and event.follow_up_needed:
-                # Determine the timing context
-                timing_context = ""
-                if event.event_date == today:
-                    timing_context = "today"
-                elif event.event_date == yesterday:
-                    timing_context = "yesterday"
-                elif event.event_date and event.event_date > today and (event.event_date - today).days <= 2:
-                    days_until = (event.event_date - today).days
-                    timing_context = f"in {days_until} day{'s' if days_until > 1 else ''}"
-                else:
-                    continue  # Skip events outside our follow-up window
-                
-                # Generate personalized greeting using LLM
-                return self._generate_event_greeting_with_llm(event, name, timing_context)
+        # STEP 1: Check if we need to generate yesterday's summary (first chat of new day)
+        self._generate_daily_summary_if_needed(email)
+        
+        # STEP 2: Get pending events from Firebase events table
+        pending_events = firebase_manager.get_pending_events(email)
+        
+        for event_data in pending_events:
+            # Convert event_data to proper format for checking
+            event_date = None
+            if event_data.get('eventDate'):
+                from datetime import datetime
+                event_date = datetime.fromisoformat(event_data['eventDate']).date()
+            
+            # Determine the timing context
+            timing_context = ""
+            if event_date == today:
+                timing_context = "today"
+            elif event_date == yesterday:
+                timing_context = "yesterday"
+            elif event_date and event_date > today and (event_date - today).days <= 2:
+                days_until = (event_date - today).days
+                timing_context = f"in {days_until} day{'s' if days_until > 1 else ''}"
+            else:
+                continue  # Skip events outside our follow-up window
+            
+            # Create temporary event object for greeting generation
+            event = ImportantEvent(
+                event_id=event_data['event_id'],
+                user_id=email,
+                event_type=event_data['eventType'],
+                description=event_data['description'],
+                event_date=event_date
+            )
+            
+            # Generate personalized greeting using LLM
+            return self._generate_event_greeting_with_llm(event, name, timing_context)
         
         return None
 
@@ -617,22 +637,17 @@ Listen to me: You're in crisis right now, and that's okay - it happens to the st
             else:
                 return f"Hey {name}! How are you feeling about your upcoming {event.event_type}?"
 
-    def _mark_event_followed_up(self, user_id: str, event_type: str) -> None:
+    def _mark_event_followed_up(self, email: str, event_type: str) -> None:
         """Mark events as followed up after asking about them."""
-        user_profile = self.memory_manager.get_user_profile(user_id)
-        
-        for event in user_profile.important_events:
-            if event.event_type == event_type and not event.follow_up_done:
-                event.follow_up_done = True
-        
-        self.memory_manager.update_user_profile(user_id, {"important_events": user_profile.important_events})
+        from firebase_manager import firebase_manager
+        firebase_manager.mark_event_followed_up(email, event_type)
 
-    def _generate_follow_up_questions(self, emotion: str, urgency_level: int, user_name: str, user_id: str, user_message: str = "") -> List[str]:
+    def _generate_follow_up_questions(self, emotion: str, urgency_level: int, user_name: str, email: str, user_message: str = "") -> List[str]:
         """Generate personalized follow-up questions using LLM based on emotion, urgency, and conversation context."""
         name = user_name or "friend"
         
         # Get conversation context
-        recent_messages = self.memory_manager.get_recent_messages(user_id, 10)
+        recent_messages = self.memory_manager.get_recent_messages(email, 10)
         conversation_depth = len(recent_messages)
         
         # Build conversation history for context
@@ -863,3 +878,95 @@ Listen to me: You're in crisis right now, and that's okay - it happens to the st
                 "How are you feeling right now?",
                 "What's been on your mind today?"
             ]
+
+    def _generate_daily_summary_if_needed(self, email: str) -> Optional[dict]:
+        """Generate summary for the user's last conversation day if needed."""
+        from firebase_manager import firebase_manager
+        from datetime import date
+        
+        # Find the last day user had a conversation
+        last_conversation_date = firebase_manager.get_last_conversation_date(email)
+        
+        if last_conversation_date:
+            date_str = last_conversation_date.strftime('%Y%m%d')
+            today_str = date.today().strftime('%Y%m%d')
+            
+            # Only generate if it's not today and summary doesn't exist
+            if date_str != today_str and not firebase_manager.daily_summary_exists(email, date_str):
+                conversation_data = firebase_manager.get_conversation_by_date(email, date_str)
+                
+                if conversation_data and len(conversation_data.get('messages', {})) > 0:
+                    # Generate summary for the last conversation day
+                    summary = self._generate_conversation_summary(email, conversation_data, last_conversation_date)
+                    if summary:
+                        firebase_manager.store_daily_summary(email, date_str, summary)
+                        return summary
+        
+        return None
+
+    def _generate_conversation_summary(self, email: str, conversation_data: dict, conversation_date) -> Optional[dict]:
+        """Generate AI summary of a day's conversation using LLM."""
+        
+        # Build conversation text
+        messages = conversation_data.get('messages', {})
+        conversation_text = ""
+        emotions = []
+        urgency_levels = []
+        
+        for msg_data in messages.values():
+            role = msg_data.get('role', 'unknown')
+            content = msg_data.get('content', '')
+            emotion = msg_data.get('emotionDetected')
+            urgency = msg_data.get('urgencyLevel', 1)
+            
+            conversation_text += f"{role}: {content}\n"
+            if emotion:
+                emotions.append(emotion)
+            urgency_levels.append(urgency)
+        
+        if not conversation_text.strip():
+            return None
+        
+        # Generate summary using LLM
+        summary_prompt = f"""Summarize this conversation between a user and their mental health support friend:
+
+CONVERSATION:
+{conversation_text}
+
+Create a friendly summary that covers:
+1. What the user talked about and how they were feeling
+2. Main topics or concerns they shared
+3. Any positive moments or progress they mentioned
+4. Important things to remember for next time you chat
+5. How they seemed to be feeling by the end
+
+Keep it:
+- Simple and conversational (like notes a friend would take)
+- Under 120 words
+- Focused on what matters for continuing the friendship
+- Written like "User talked about..." or "They seemed..."
+- Remember this is for helping continue supportive conversations
+
+Write a natural summary that helps remember what happened in this chat."""
+
+        try:
+            messages = [
+                SystemMessage(content="You are a caring friend creating simple conversation summaries to help remember what you talked about with someone. Write in a natural, friendly tone like you're taking notes to remember for next time."),
+                HumanMessage(content=summary_prompt)
+            ]
+            
+            response = self.llm.invoke(messages)
+            summary_text = response.content.strip()
+            
+            return {
+                "date": conversation_date.strftime('%Y-%m-%d'),
+                "summary_text": summary_text,
+                "emotion_trend": list(set(emotions)) if emotions else [],
+                "avg_urgency": sum(urgency_levels) / len(urgency_levels) if urgency_levels else 1,
+                "message_count": len(messages),
+                "created_at": datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            # Silently handle summary generation errors - not critical for chat functionality
+            return None

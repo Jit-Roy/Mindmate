@@ -20,7 +20,7 @@ class UserProfile(BaseModel):
     user_id: str
     name: Optional[str] = None
     age: Optional[int] = None
-    preferred_name: Optional[str] = None
+    display_name: Optional[str] = None
     mental_health_concerns: List[str] = Field(default_factory=list)
     support_preferences: List[str] = Field(default_factory=list)
     important_events: List[ImportantEvent] = Field(default_factory=list)
