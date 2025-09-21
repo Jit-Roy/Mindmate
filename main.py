@@ -38,6 +38,7 @@ def android_chat(user_prompt, user_email="arientific@gmail.com"):
             
             return redirect_response
 
+
         chatbot._detect_important_events(user_prompt, user_email)
         context = memory_manager.get_conversation_context(user_email)
         recent_messages = memory_manager.get_recent_messages(user_email, 20)
@@ -121,16 +122,5 @@ def android_chat(user_prompt, user_email="arientific@gmail.com"):
         return bot_message
         
     except Exception as e:
-        return "Sorry, I'm having technical difficulties. Please try again later."
+        return f"Sorry, I'm having technical difficulties. Please try again later. Error: {e}"
 
-# # Test 1 - Should detect event and show proactive features
-# response1 = android_chat("Hey, I have a job interview next week and I'm really nervous")
-# print(f"✅ Response 1:\n{response1}\n")
-
-# # Test 2 - Should use conversation context
-# response2 = android_chat("Thanks for the advice! How can I prepare better?")
-# print(f"✅ Response 2:\n{response2}\n")
-
-# # Test 3 - Should handle emotion and urgency
-# response3 = android_chat("I'm feeling really overwhelmed and stressed today")
-# print(f"✅ Response 3:\n{response3}\n")

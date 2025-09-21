@@ -560,10 +560,13 @@ Listen to me: You're in crisis right now, and that's okay - it happens to the st
         
         for event_data in pending_events:
             # Convert event_data to proper format for checking
-            event_date = None
-            if event_data.get('eventDate'):
-                from datetime import datetime
-                event_date = datetime.fromisoformat(event_data['eventDate']).date()
+            #event_date = None
+            event_date_str = event_data.get('eventDate')
+            if isinstance(event_date_str, str) and event_date_str:
+                        from datetime import datetime
+                        event_date = datetime.fromisoformat(event_date_str).date()
+            else:
+                        event_date = None
             
             # Determine the timing context
             timing_context = ""

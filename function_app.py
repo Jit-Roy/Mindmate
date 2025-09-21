@@ -13,11 +13,11 @@ app = func.FunctionApp()
 CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept",
 }
 
 
-@app.route(route="chat", methods=["POST", "OPTIONS"], auth_level=func.AuthLevel.FUNCTION)
+@app.route(route="chat", auth_level=func.AuthLevel.FUNCTION)
 def chat_handler(req: func.HttpRequest) -> func.HttpResponse:
     """
     Handles POST requests to process a user's message via the chatbot.
