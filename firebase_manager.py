@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+
 """
 Firebase Manager for Email-Based User Schema
 No sessions, no analytics, no separate tables - just users organized by email
@@ -92,7 +92,6 @@ class FirebaseManager:
         
         if self.db:
             try:
-                # Use email as document ID in the users collection
                 self.db.collection('users').document(email).set(profile_data)
                 print(f"SUCCESS: Created user profile for {email}")
             except Exception as e:
