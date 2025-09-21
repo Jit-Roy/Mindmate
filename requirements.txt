@@ -6,3 +6,4 @@ python-dotenv>=1.0.0
 rich>=13.0.0
 plyer>=2.1.0
 firebase-admin>=7.0.0
+azure-functions
