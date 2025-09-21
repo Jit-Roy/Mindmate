@@ -4,7 +4,7 @@ from datetime import datetime, date
 from typing import List, Optional
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
-from models import ChatResponse, UserProfile, ConversationMessage, ImportantEvent
+from models import ChatResponse, UserProfile, ChatPair, ImportantEvent
 from memory import MemoryManager
 from filter import MentalHealthFilter
 from config import config
@@ -436,11 +436,11 @@ Listen to me: You're in crisis right now, and that's okay - it happens to the st
             
             # Create and store the event
             event = ImportantEvent(
-                event_id=str(uuid.uuid4()),
-                user_id=email,
-                event_type=event_detection.get('event_type', 'event'),
+                eventType=event_detection.get('event_type', 'event'),
                 description=message,
-                event_date=event_date
+                eventDate=event_date.isoformat() if event_date else None,
+                followUpNeeded=True,
+                followUpDone=False
             )
             
             # Store event directly in Firebase events table
@@ -578,11 +578,12 @@ Listen to me: You're in crisis right now, and that's okay - it happens to the st
             
             # Create temporary event object for greeting generation
             event = ImportantEvent(
-                event_id=event_data['event_id'],
-                user_id=email,
-                event_type=event_data['eventType'],
+                eventType=event_data['eventType'],
                 description=event_data['description'],
-                event_date=event_date
+                eventDate=event_date.isoformat() if event_date else None,
+                mentionedAt=event_data.get('mentionedAt', ''),
+                followUpNeeded=event_data.get('followUpNeeded', True),
+                followUpDone=event_data.get('followUpDone', False)
             )
             
             # Generate personalized greeting using LLM
@@ -604,7 +605,7 @@ Listen to me: You're in crisis right now, and that's okay - it happens to the st
 
         EVENT CONTEXT:
         - Person's name: {name}
-        - Event type: {event.event_type}
+        - Event type: {event.eventType}
         - Timing: {timing_context}
         - Event description: {event.description if hasattr(event, 'description') else 'Not available'}
 
@@ -618,7 +619,7 @@ Listen to me: You're in crisis right now, and that's okay - it happens to the st
         try:
             messages = [
                 SystemMessage(content=system_prompt),
-                HumanMessage(content=f"Generate a caring greeting for {name} about their {event.event_type} that happened/happens {timing_context}")
+                HumanMessage(content=f"Generate a caring greeting for {name} about their {event.eventType} that happened/happens {timing_context}")
             ]
             
             response = self.llm.invoke(messages)
@@ -633,9 +634,9 @@ Listen to me: You're in crisis right now, and that's okay - it happens to the st
         except Exception as e:
             # Simple fallback if LLM fails
             if timing_context in ["today", "yesterday"]:
-                return f"Hey {name}! How did your {event.event_type} go {timing_context}?"
+                return f"Hey {name}! How did your {event.eventType} go {timing_context}?"
             else:
-                return f"Hey {name}! How are you feeling about your upcoming {event.event_type}?"
+                return f"Hey {name}! How are you feeling about your upcoming {event.eventType}?"
 
     def _mark_event_followed_up(self, email: str, event_type: str) -> None:
         """Mark events as followed up after asking about them."""
@@ -963,8 +964,7 @@ Write a natural summary that helps remember what happened in this chat."""
                 "summary_text": summary_text,
                 "emotion_trend": list(set(emotions)) if emotions else [],
                 "avg_urgency": sum(urgency_levels) / len(urgency_levels) if urgency_levels else 1,
-                "message_count": len(messages),
-                "created_at": datetime.now().isoformat()
+                "message_count": len(messages)
             }
             
         except Exception as e:

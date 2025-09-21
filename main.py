@@ -9,25 +9,26 @@ from rich.prompt import Prompt
 from chatbot import MentalHealthChatbot
 from config import config
 from firebase_manager import firebase_manager
-from auth_manager import auth_manager, AuthUser
+from models import UserProfile
 
 console = Console()
 
 class ChatInterface:
-    """Authenticated interactive chat interface for the mental health chatbot."""
+    """Simple email-based chat interface for the mental health chatbot."""
     
     def __init__(self):
         self.chatbot = MentalHealthChatbot()
-        self.current_user: AuthUser = None
+        self.current_user: UserProfile = None
+        self.current_email: str = None  # Track email separately
         self.running = True
     
     def display_welcome(self):
         """Display welcome message."""
         welcome_text = Text()
-        welcome_text.append("🔐 MyBro AI - Mental Health Companion", style="bold cyan")
-        welcome_text.append("\n\nWelcome to MyBro AI! Your secure mental health companion that remembers your conversations and provides personalized support.\n\n", style="green")
+        welcome_text.append("� MyBro AI - Mental Health Companion", style="bold cyan")
+        welcome_text.append("\n\nWelcome to MyBro AI! Your mental health companion that remembers your conversations and provides personalized support.\n\n", style="green")
         welcome_text.append("🔑 Features:", style="bold blue")
-        welcome_text.append("\n• Secure email-based login")
+        welcome_text.append("\n• Simple email-based access")
         welcome_text.append("\n• Personalized conversation history")
         welcome_text.append("\n• Mental health tracking and insights")
         welcome_text.append("\n• Crisis intervention support")
@@ -44,79 +45,45 @@ class ChatInterface:
         
         console.print(Panel(welcome_text, title="Welcome to MyBro AI", border_style="cyan"))
     
-    async def authenticate_user(self) -> bool:
-        """Handle user authentication (login or register)"""
-        console.print("\n[bold cyan]🔐 User Authentication[/bold cyan]")
+    async def get_user_email(self) -> bool:
+        """Get user email and create/retrieve their profile"""
+        console.print("\n[bold cyan]� Access MyBro AI[/bold cyan]")
         
         while True:
-            auth_choice = Prompt.ask(
-                "Do you want to [L]ogin or [R]egister?", 
-                choices=["l", "L", "r", "R", "login", "register"], 
-                default="l"
-            ).lower()
+            email = Prompt.ask("Enter your email address").strip().lower()
             
-            if auth_choice in ["l", "login"]:
-                if await self._handle_login():
+            if not self._validate_email(email):
+                console.print("[red]❌ Please enter a valid email address[/red]")
+                continue
+                
+            # Get or create user profile
+            with console.status("[bold blue]Setting up your profile...", spinner="dots"):
+                try:
+                    # Try to get existing user
+                    user_profile = firebase_manager.get_user_profile(email)
+                    
+                    if user_profile.name == "Unknown":  # New user
+                        name = Prompt.ask(f"Hi! I'm MyBro AI 💙 What should I call you?", default="friend")
+                        user_profile = firebase_manager.create_user_profile(email, name)
+                        console.print(f"[green]✅ Welcome to MyBro AI, {user_profile.name or 'friend'}! Nice to meet you![/green]")
+                    else:  # Existing user
+                        console.print(f"[green]✅ Welcome back, {user_profile.name or 'friend'}! 💙[/green]")
+                    
+                    self.current_user = user_profile
+                    self.current_email = email  # Store email separately
                     return True
-            elif auth_choice in ["r", "register"]:
-                if await self._handle_register():
-                    return True
-            
-            retry = Prompt.ask("Would you like to try again?", choices=["y", "n"], default="y")
-            if retry.lower() == "n":
-                return False
+                    
+                except Exception as e:
+                    console.print(f"[red]❌ Error setting up profile: {e}[/red]")
+                    retry = Prompt.ask("Would you like to try again?", choices=["y", "n"], default="y")
+                    if retry.lower() == "n":
+                        return False
     
-    async def _handle_login(self) -> bool:
-        """Handle user login"""
-        console.print("\n[bold blue]📧 Login to MyBro AI[/bold blue]")
-        
-        console.print("[dim]Note: Password will be hidden while typing (this is normal)[/dim]")
-        
-        email = Prompt.ask("Email address")
-        password = Prompt.ask("Password", password=True)
-        
-        with console.status("[bold blue]Authenticating...", spinner="dots"):
-            result = await auth_manager.login_user(email, password)
-        
-        if result.success:
-            self.current_user = result.user
-            console.print(f"[green]✅ Welcome back, {self.current_user.display_name}![/green]")
-            return True
-        else:
-            console.print(f"[red]❌ Login failed: {result.error_message}[/red]")
-            return False
-    
-    async def _handle_register(self) -> bool:
-        """Handle user registration"""
-        console.print("\n[bold blue]📝 Register for MyBro AI[/bold blue]")
-        
-        email = Prompt.ask("Email address")
-        display_name = Prompt.ask("Your name")
-        
-        console.print("\n[yellow]Password Requirements:[/yellow]")
-        console.print("• At least 8 characters")
-        console.print("• One uppercase letter")
-        console.print("• One lowercase letter") 
-        console.print("• One number")
-        console.print("[dim]Note: Password will be hidden while typing (this is normal)[/dim]")
-        
-        password = Prompt.ask("Create password", password=True)
-        confirm_password = Prompt.ask("Confirm password", password=True)
-        
-        if password != confirm_password:
-            console.print("[red]❌ Passwords don't match[/red]")
-            return False
-        
-        with console.status("[bold blue]Creating account...", spinner="dots"):
-            result = await auth_manager.register_user(email, password, display_name)
-        
-        if result.success:
-            self.current_user = result.user
-            console.print(f"[green]✅ Account created successfully! Welcome, {self.current_user.display_name}![/green]")
-            return True
-        else:
-            console.print(f"[red]❌ Registration failed: {result.error_message}[/red]")
-            return False
+    def _validate_email(self, email: str) -> bool:
+        """Simple email validation"""
+        import re
+        pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        return re.match(pattern, email) is not None
     
     def display_user_info(self):
         """Display current user information"""
@@ -124,11 +91,9 @@ class ChatInterface:
             return
             
         user_text = Text()
-        user_text.append(f"👤 User: {self.current_user.display_name}", style="bold green")
-        user_text.append(f"\n📧 Email: {self.current_user.email}")
-        user_text.append(f"\n🆔 User ID: {self.current_user.user_id} (Internal)")
-        user_text.append(f"\n📨 Primary ID: {self.current_user.email}")
-        user_text.append(f"\n🕒 Last Login: {self.current_user.last_login_at.strftime('%Y-%m-%d %H:%M:%S')}")
+        user_text.append(f"👤 User: {self.current_user.name or 'friend'}", style="bold green")
+        user_text.append(f"\n📧 Email: {self.current_email}")
+        user_text.append(f"\n🆔 User ID: {self.current_email}")
         
         console.print(Panel(user_text, title="Current User", border_style="green"))
     
@@ -137,7 +102,7 @@ class ChatInterface:
         
         # Main response
         response_text = Text(response.message, style="white")
-        console.print(Panel(response_text, title=f"💙 MyBro AI (for {self.current_user.display_name})", border_style="blue"))
+        console.print(Panel(response_text, title=f"💙 MyBro AI (for {self.current_user.name or 'friend'})", border_style="blue"))
         
         # Show suggestions if any
         if response.suggestions:
@@ -185,15 +150,15 @@ class ChatInterface:
         name = Prompt.ask("What would you like me to call you?", default="friend")
         age = Prompt.ask("What's your age? (optional)", default="")
         
-        # Update profile - only use displayName (authorized field)
+        # Update profile - only use name (authorized field)
         profile_updates = {
-            "displayName": name
+            "name": name
         }
         
-        # Note: age and display_name are not stored in profile table
-        # Only displayName is used as the user's name
+        # Note: age is not stored in profile table
+        # Only name is used as the user's name
         
-        self.chatbot.memory_manager.update_user_profile(self.current_user.email, profile_updates)
+        self.chatbot.memory_manager.update_user_profile(self.current_email, profile_updates)
         
         console.print(f"\n[green]Great! I'll call you {name}. Feel free to share whatever's on your mind.[/green]")
     
@@ -202,15 +167,15 @@ class ChatInterface:
         try:
             self.display_welcome()
             
-            # Authentication
-            if not await self.authenticate_user():
-                console.print("[red]Authentication required. Goodbye![/red]")
+            # Get user email and set up profile
+            if not await self.get_user_email():
+                console.print("[red]Email required to continue. Goodbye![/red]")
                 return
             
             # Display user info
             self.display_user_info()
             
-            console.print(f"\n[bold green]Hello {self.current_user.display_name}! 💙 I'm here to listen and support you.[/bold green]")
+            console.print(f"\n[bold green]Hello {self.current_user.name or 'friend'}! 💙 I'm here to listen and support you.[/bold green]")
             console.print("[dim]Type 'help' for commands or just start chatting![/dim]\n")
             
             while self.running:
@@ -239,19 +204,20 @@ class ChatInterface:
                         self.display_welcome()
                         continue
                     elif user_message.lower() == 'logout':
-                        console.print("\n[yellow]Logging out...[/yellow]")
+                        console.print("\n[yellow]Switching user...[/yellow]")
                         self.current_user = None
-                        if await self.authenticate_user():
+                        self.current_email = None
+                        if await self.get_user_email():
                             self.display_user_info()
-                            console.print(f"\n[bold green]Welcome back {self.current_user.display_name}![/bold green]")
+                            console.print(f"\n[bold green]Welcome {self.current_user.name or 'friend'}![/bold green]")
                         else:
-                            console.print("[red]Authentication required. Goodbye![/red]")
+                            console.print("[red]Email required to continue. Goodbye![/red]")
                             break
                         continue
                     
                     # Get chatbot response
                     with console.status("[dim]Thinking...", spinner="dots"):
-                        response = await self.chatbot.chat(self.current_user.email, user_message)
+                        response = await self.chatbot.chat(self.current_email, user_message)
                     
                     # Display response
                     self.display_response(response)
@@ -288,7 +254,7 @@ if __name__ == "__main__":
     def clear_history(self):
         """Clear conversation history."""
         # Create new conversation
-        self.chatbot.memory_manager.create_conversation(self.current_user.email)
+        self.chatbot.memory_manager.create_conversation(self.current_email)
         console.print("[green]Conversation history cleared. Fresh start![/green]")
     
     async def run(self):
@@ -309,7 +275,7 @@ if __name__ == "__main__":
         existing_profiles = self.chatbot.memory_manager.get_all_user_profiles()
         if existing_profiles:
             # Show existing users (without IDs for privacy)
-            user_names = [p.name or p.display_name for p in existing_profiles.values() if p.name or p.display_name]
+            user_names = [p.name for p in existing_profiles.values() if p.name]
             if user_names:
                 console.print(f"\n[dim]I recognize some friends: {', '.join(user_names[:3])}{'...' if len(user_names) > 3 else ''}[/dim]")
                 continue_choice = Prompt.ask("Are you continuing a previous conversation?", choices=["y", "n"], default="n")
@@ -319,7 +285,7 @@ if __name__ == "__main__":
                     existing_user = self.chatbot.memory_manager.find_user_by_name(name_to_find)
                     if existing_user:
                         # Note: In email-based schema, we should match by email not user_id
-                        console.print(f"[green]Welcome back, {existing_user.name or existing_user.display_name}! 😊[/green]")
+                        console.print(f"[green]Welcome back, {existing_user.name or 'friend'}! 😊[/green]")
                     else:
                         console.print(f"[yellow]Hmm, I don't recognize that name. Let's start fresh! 🌟[/yellow]")
         
@@ -359,7 +325,7 @@ if __name__ == "__main__":
                 # Show typing indicator
                 with console.status("[bold blue]Thinking...", spinner="dots"):
                     # Get chatbot response
-                    response = await self.chatbot.chat(self.current_user.email, user_input)
+                    response = await self.chatbot.chat(self.current_email, user_input)
                 
                 # Display response
                 self.display_response(response)

@@ -9,18 +9,19 @@ import secrets
 from datetime import datetime, date
 from typing import List, Dict, Any, Optional
 import firebase_admin
-from firebase_admin import credentials, db
-from models import UserProfile, ConversationMessage, ImportantEvent
+from firebase_admin import credentials, firestore
+from google.cloud.firestore import FieldFilter
+from models import UserProfile, ChatPair, ImportantEvent
 
 # Load environment variables
 from dotenv import load_dotenv
 load_dotenv()
 
 class FirebaseManager:
-    """Firebase manager with email-based user organization."""
+    """Firebase manager with email-based user organization using Firestore."""
     
     def __init__(self):
-        self.db_ref = None
+        self.db = None
         self.initialize_firebase()
     
     def initialize_firebase(self):
@@ -36,11 +37,11 @@ class FirebaseManager:
                 else:
                     raise Exception("No valid Firebase credentials found")
             
-            self.db_ref = db.reference()
+            self.db = firestore.client()
             
         except Exception as e:
             print(f"ERROR: Firebase initialization failed: {e}")
-            self.db_ref = None
+            self.db = None
     
     def _use_env_credentials(self):
         """Try to initialize Firebase using environment variables."""
@@ -64,9 +65,7 @@ class FirebaseManager:
             }
             
             cred = credentials.Certificate(cred_dict)
-            firebase_admin.initialize_app(cred, {
-                'databaseURL': 'https://mybro-a1ea5-default-rtdb.firebaseio.com/'
-            })
+            firebase_admin.initialize_app(cred)
             return True
             
         except Exception as e:
@@ -77,84 +76,60 @@ class FirebaseManager:
         """Try to initialize Firebase using service account file."""
         try:
             cred = credentials.Certificate("mybro-a1ea5-firebase-adminsdk-5a3xf-6089092d21.json")
-            firebase_admin.initialize_app(cred, {
-                'databaseURL': 'https://mybro-a1ea5-default-rtdb.firebaseio.com/'
-            })
+            firebase_admin.initialize_app(cred)
             return True
         except Exception as e:
             print(f"Service account file failed: {e}")
             return False
     
-    def _email_to_key(self, email: str) -> str:
-        """Convert email to Firebase-safe key."""
-        return email.replace('.', '_').replace('@', '_at_')
-    
     # ==================== USER PROFILE OPERATIONS ====================
     
-    def create_user_profile(self, email: str, display_name: str = None) -> UserProfile:
-        """Create a new user profile using email as key in profile subfolder."""
-        email_key = self._email_to_key(email)
-        
+    def create_user_profile(self, email: str, name: str = None) -> UserProfile:
+        """Create a new user profile using email as document ID in users collection."""
         profile_data = {
-            "displayName": display_name,
-            "createdAt": datetime.now().isoformat(),
-            "lastActive": datetime.now().isoformat()
+            "name": name
         }
         
-        if self.db_ref:
+        if self.db:
             try:
-                self.db_ref.child('users').child(email_key).child('profile').update(profile_data)
+                # Use email as document ID in the users collection
+                self.db.collection('users').document(email).set(profile_data)
                 print(f"SUCCESS: Created user profile for {email}")
             except Exception as e:
                 print(f"ERROR: Error creating user profile: {e}")
         
         return UserProfile(
-            user_id=email,
-            name=display_name,
-            display_name=display_name or "friend"
+            name=name
         )
     
     def get_user_profile(self, email: str) -> UserProfile:
-        """Get user profile from Firebase using email from profile subfolder."""
-        email_key = self._email_to_key(email)
-        
-        if self.db_ref:
+        """Get user profile from Firestore using email as document ID."""
+        if self.db:
             try:
-                # Get profile data from subfolder
-                user_data = self.db_ref.child('users').child(email_key).child('profile').get()
-                if user_data:
-                    # Return profile without loading events - events are accessed separately
-                    # Only use authorized fields from Firebase profile
+                # Get profile data from users collection
+                doc_ref = self.db.collection('users').document(email)
+                doc = doc_ref.get()
+                
+                if doc.exists:
+                    user_data = doc.to_dict()
                     return UserProfile(
-                        user_id=email,
-                        name=user_data.get('displayName'),
-                        display_name=user_data.get('displayName', 'friend'),
-                        age=None,  # Age not stored in profile table
-                        mental_health_concerns=[],  # No mental health data in profile
-                        support_preferences=[],     # No support preferences in profile
-                        important_events=[]         # Events stored separately in events table
+                        name=user_data.get('name')
                     )
             except Exception as e:
                 print(f"ERROR: Error getting user profile: {e}")
         
         return UserProfile(
-            user_id=email,
-            name="Unknown",
-            display_name="friend",
-            important_events=[]  # Events stored separately
+            name="Unknown"
         )
     
     def update_user_profile(self, email: str, updates: Dict[str, Any]):
-        """Update user profile in Firebase using email in profile subfolder."""
-        email_key = self._email_to_key(email)
-        
+        """Update user profile in Firestore using email as document ID."""
         # Define allowed profile fields only
         allowed_fields = {
-            'createdAt', 'displayName', 'isActive', 'isVerified', 
-            'lastActive', 'lastLoginAt', 'passwordHash'
+            'name'
         }
         
-        if self.db_ref:
+        if self.db:
             try:
                 # Only allow authorized fields, reject everything else
                 profile_updates = {
@@ -162,11 +137,8 @@ class FirebaseManager:
                     if k in allowed_fields
                 }
                 
-                # Always update lastActive when profile is updated
-                profile_updates['lastActive'] = datetime.now().isoformat()
-                
                 if profile_updates:
-                    self.db_ref.child('users').child(email_key).child('profile').update(profile_updates)
+                    self.db.collection('users').document(email).update(profile_updates)
                     print(f"SUCCESS: Updated user profile for {email} with fields: {list(profile_updates.keys())}")
                 else:
                     print(f"INFO: No authorized fields to update for {email}")
@@ -176,115 +148,138 @@ class FirebaseManager:
     
     # ==================== CONVERSATION OPERATIONS ====================
     
-    def add_message(self, email: str, role: str, content: str, 
-                   emotion_detected: str = None, urgency_level: int = 1):
-        """Add a message to Firebase with simplified email-based schema."""
-        if not self.db_ref:
+    def add_chat_pair(self, email: str, user_message: str, model_response: str, 
+                      emotion_detected: str = None, urgency_level: int = 1):
+        """Add a chat pair (user + model response) to Firestore."""
+        if not self.db:
             return
         
         try:
-            email_key = self._email_to_key(email)
             now = datetime.now()
             conversation_id = f"conv_{now.strftime('%Y%m%d')}"
-            message_id = f"msg_{now.strftime('%H%M%S')}_{secrets.token_hex(4)}"
             
-            message_data = {
-                "role": role,
-                "content": content,
-                "timestamp": now.isoformat(),
-                "emotionDetected": emotion_detected,
-                "urgencyLevel": urgency_level
+            chat_pair_data = {
+                "user": user_message,
+                "model": model_response,
+                "timestamp": firestore.SERVER_TIMESTAMP,
+                "emotion_detected": emotion_detected,  # Use snake_case consistently
+                "urgency_level": urgency_level         # Use snake_case consistently
             }
             
-            # Add message to user's conversation
-            self.db_ref.child('users').child(email_key).child('conversations').child(conversation_id).child('messages').child(message_id).set(message_data)
+            # Add chat pair to user's conversation subcollection
+            self.db.collection('users').document(email).collection('conversations').document(conversation_id).collection('chat').add(chat_pair_data)
             
             # Update conversation metadata
-            conv_metadata_ref = self.db_ref.child('users').child(email_key).child('conversations').child(conversation_id).child('metadata')
-            existing_metadata = conv_metadata_ref.get() or {}
+            conv_doc_ref = self.db.collection('users').document(email).collection('conversations').document(conversation_id)
+            conv_doc = conv_doc_ref.get()
             
-            message_count = existing_metadata.get('messageCount', 0) + 1
+            if conv_doc.exists:
+                existing_metadata = conv_doc.to_dict()
+                pair_count = existing_metadata.get('chatPairCount', 0) + 1
+                message_count = existing_metadata.get('messageCount', 0) + 2  # Each pair adds 2 messages
+            else:
+                pair_count = 1
+                message_count = 2  # First pair = 2 messages
+            
             metadata = {
                 "startDate": now.strftime('%Y-%m-%d'),
+                "chatPairCount": pair_count,
                 "messageCount": message_count,
-                "lastMessageAt": now.isoformat()
+                "lastChatAt": firestore.SERVER_TIMESTAMP,
+                "lastMessageAt": firestore.SERVER_TIMESTAMP
             }
             
-            conv_metadata_ref.update(metadata)
-            print(f"SUCCESS: Added message to {email}'s conversation")
+            conv_doc_ref.set(metadata, merge=True)
+            print(f"SUCCESS: Added chat pair to {email}'s conversation")
             
         except Exception as e:
-            print(f"ERROR: Error adding message: {e}")
+            print(f"ERROR: Error adding chat pair: {e}")
     
-    def get_recent_messages(self, email: str, limit: int = 10) -> List[Dict]:
-        """Get recent messages from Firebase with simplified schema."""
-        if not self.db_ref:
+    def add_message(self, email: str, role: str, content: str, 
+                   emotion_detected: str = None, urgency_level: int = 1):
+        """Legacy method - deprecated. Use add_chat_pair instead."""
+        print("WARNING: add_message is deprecated. Use add_chat_pair instead.")
+        # Keep for backward compatibility but don't actually store anything
+        pass
+    
+    def get_recent_chat(self, email: str, limit: int = 10) -> List[ChatPair]:
+        """Get recent chat pairs from Firestore."""
+        if not self.db:
             return []
         
         try:
-            email_key = self._email_to_key(email)
             today = datetime.now().strftime('%Y%m%d')
             conversation_id = f"conv_{today}"
             
-            messages = self.db_ref.child('users').child(email_key).child('conversations').child(conversation_id).child('messages').order_by_key().limit_to_last(limit).get()
+            chat_ref = self.db.collection('users').document(email).collection('conversations').document(conversation_id).collection('chat')
+            chat = chat_ref.order_by('timestamp', direction=firestore.Query.DESCENDING).limit(limit).stream()
             
-            if messages:
-                message_list = []
-                for msg in messages.values():
-                    message_list.append({
-                        'role': msg.get('role'),
-                        'content': msg.get('content'),
-                        'timestamp': msg.get('timestamp'),
-                        'emotion_detected': msg.get('emotionDetected'),
-                        'urgency_level': msg.get('urgencyLevel', 1)
-                    })
-                return message_list
+            chat_pair_list = []
+            for doc in chat:
+                pair_data = doc.to_dict()
+                # Create ChatPair object from the data (handle both formats for compatibility)
+                chat_pair = ChatPair(
+                    user=pair_data.get('user', ''),
+                    model=pair_data.get('model', ''),
+                    timestamp=pair_data.get('timestamp', datetime.now()),
+                    emotion_detected=pair_data.get('emotion_detected') or pair_data.get('emotionDetected'),
+                    urgency_level=pair_data.get('urgency_level') or pair_data.get('urgencyLevel', 1)
+                )
+                chat_pair_list.append(chat_pair)
+            
+            # Reverse to get chronological order (oldest first)
+            chat_pair_list.reverse()
+            return chat_pair_list
             
         except Exception as e:
-            print(f"ERROR: Error getting recent messages: {e}")
+            print(f"ERROR: Error getting recent chat pairs: {e}")
         
+        return []
+
+    def get_recent_messages(self, email: str, limit: int = 10) -> List[Dict]:
+        """Legacy method - deprecated. Use get_recent_chat instead."""
+        print("WARNING: get_recent_messages is deprecated. Use get_recent_chat instead.")
         return []
     
     # ==================== EVENT OPERATIONS ====================
     
     def add_important_event(self, email: str, event: ImportantEvent):
-        """Add an important event to Firebase under user's email."""
-        if not self.db_ref:
+        """Add an important event to Firestore using subcollection."""
+        if not self.db:
             return
         
         try:
-            email_key = self._email_to_key(email)
             event_data = {
-                "eventType": event.event_type,
+                "eventType": event.eventType,
                 "description": event.description,
-                "eventDate": event.event_date.isoformat() if event.event_date else None,
-                "mentionedAt": event.mentioned_date.isoformat(),
-                "followUpNeeded": event.follow_up_needed,
-                "followUpDone": event.follow_up_done
+                "eventDate": event.eventDate,
+                "mentionedAt": event.mentionedAt,
+                "followUpNeeded": event.followUpNeeded,
+                "followUpDone": event.followUpDone
             }
             
-            self.db_ref.child('users').child(email_key).child('events').child(event.event_id).set(event_data)
-            print(f"SUCCESS: Added event for {email}: {event.event_type}")
+            # Generate a unique document ID since we no longer have event_id in the model
+            doc_ref = self.db.collection('users').document(email).collection('events').document()
+            doc_ref.set(event_data)
+            print(f"SUCCESS: Added event for {email}: {event.eventType}")
             
         except Exception as e:
             print(f"ERROR: Error adding event: {e}")
     
     def get_pending_events(self, email: str) -> List[Dict]:
         """Get events that need follow-up for user."""
-        if not self.db_ref:
+        if not self.db:
             return []
         
         try:
-            email_key = self._email_to_key(email)
-            events_data = self.db_ref.child('users').child(email_key).child('events').get() or {}
+            events_ref = self.db.collection('users').document(email).collection('events')
+            events = events_ref.where(filter=FieldFilter('followUpNeeded', '==', True)).where(filter=FieldFilter('followUpDone', '==', False)).stream()
             
             pending_events = []
-            for event_id, event_data in events_data.items():
-                if event_data.get('followUpNeeded', True) and not event_data.get('followUpDone', False):
-                    pending_events.append({
-                        'event_id': event_id,
-                        **event_data
-                    })
+            for doc in events:
+                event_data = doc.to_dict()
+                event_data['event_id'] = doc.id
+                pending_events.append(event_data)
             
             return pending_events
             
@@ -295,42 +290,39 @@ class FirebaseManager:
     
     def mark_event_followed_up(self, email: str, event_type: str) -> None:
         """Mark events as followed up after asking about them."""
-        if not self.db_ref:
+        if not self.db:
             return
         
         try:
-            email_key = self._email_to_key(email)
-            events_data = self.db_ref.child('users').child(email_key).child('events').get() or {}
+            events_ref = self.db.collection('users').document(email).collection('events')
+            events = events_ref.where(filter=FieldFilter('eventType', '==', event_type)).where(filter=FieldFilter('followUpDone', '==', False)).stream()
             
-            for event_id, event_data in events_data.items():
-                if event_data.get('eventType') == event_type and not event_data.get('followUpDone', False):
-                    # Mark this event as followed up
-                    self.db_ref.child('users').child(email_key).child('events').child(event_id).update({
-                        'followUpDone': True
-                    })
-                    print(f"SUCCESS: Marked event as followed up: {event_type}")
-                    break
+            for doc in events:
+                # Mark this event as followed up
+                doc.reference.update({'followUpDone': True})
+                print(f"SUCCESS: Marked event as followed up: {event_type}")
+                break
             
         except Exception as e:
             print(f"ERROR: Error marking event as followed up: {e}")
-        
-        return []
     
     # ==================== USER DISCOVERY OPERATIONS ====================
     
     def get_all_user_profiles(self) -> Dict[str, UserProfile]:
-        """Get all user profiles from Firebase."""
+        """Get all user profiles from Firestore."""
         try:
-            users_data = self.db_ref.child('users').get()
+            users_ref = self.db.collection('users')
+            docs = users_ref.stream()
             profiles = {}
             
-            if users_data:
-                for email_key, user_data in users_data.items():
-                    if 'profile' in user_data:
-                        email = user_data['profile'].get('email')
-                        if email:
-                            profile = self._dict_to_user_profile(user_data['profile'])
-                            profiles[email] = profile
+            for doc in docs:
+                user_data = doc.to_dict()
+                email = doc.id  # Document ID is the email
+                if user_data:
+                    profile = UserProfile(
+                        name=user_data.get('name')
+                    )
+                    profiles[email] = profile
             
             return profiles
             
@@ -342,27 +334,26 @@ class FirebaseManager:
     
     def get_last_conversation_date(self, email: str) -> Optional[date]:
         """Get the date of user's last conversation."""
-        if not self.db_ref:
+        if not self.db:
             return None
         
         try:
-            email_key = self._email_to_key(email)
-            conversations = self.db_ref.child('users').child(email_key).child('conversations').get()
+            conversations_ref = self.db.collection('users').document(email).collection('conversations')
+            conversations = conversations_ref.stream()
             
-            if conversations:
-                # Get the latest conversation date
-                conversation_dates = []
-                for conv_id in conversations.keys():
-                    if conv_id.startswith('conv_'):
-                        date_str = conv_id.replace('conv_', '')
-                        try:
-                            conv_date = datetime.strptime(date_str, '%Y%m%d').date()
-                            conversation_dates.append(conv_date)
-                        except ValueError:
-                            continue
-                
-                if conversation_dates:
-                    return max(conversation_dates)
+            conversation_dates = []
+            for doc in conversations:
+                conv_id = doc.id
+                if conv_id.startswith('conv_'):
+                    date_str = conv_id.replace('conv_', '')
+                    try:
+                        conv_date = datetime.strptime(date_str, '%Y%m%d').date()
+                        conversation_dates.append(conv_date)
+                    except ValueError:
+                        continue
+            
+            if conversation_dates:
+                return max(conversation_dates)
             
             return None
             
@@ -372,30 +363,63 @@ class FirebaseManager:
     
     def daily_summary_exists(self, email: str, date_str: str) -> bool:
         """Check if a daily summary already exists for the given date."""
-        if not self.db_ref:
+        if not self.db:
             return False
         
         try:
-            email_key = self._email_to_key(email)
-            summary = self.db_ref.child('users').child(email_key).child('summaries').child('daily').child(date_str).get()
-            return summary is not None
+            doc_ref = self.db.collection('users').document(email).collection('summaries').document(f'daily_{date_str}')
+            doc = doc_ref.get()
+            return doc.exists
             
         except Exception as e:
             print(f"ERROR: Error checking daily summary existence: {e}")
             return False
     
     def get_conversation_by_date(self, email: str, date_str: str) -> Optional[dict]:
-        """Get conversation data for a specific date."""
-        if not self.db_ref:
+        """Get conversation data for a specific date, including chat pairs as messages."""
+        if not self.db:
             return None
         
         try:
-            email_key = self._email_to_key(email)
             conversation_id = f"conv_{date_str}"
-            conversation = self.db_ref.child('users').child(email_key).child('conversations').child(conversation_id).get()
+            doc_ref = self.db.collection('users').document(email).collection('conversations').document(conversation_id)
+            doc = doc_ref.get()
             
-            if conversation:
+            if doc.exists:
+                conversation = doc.to_dict()
                 conversation['date'] = date_str
+                
+                # Get chat pairs and convert them to messages format for summarization
+                chat_ref = doc_ref.collection('chat')
+                pairs = list(chat_ref.order_by('timestamp').stream())
+                
+                messages = {}
+                message_counter = 1
+                
+                for pair in pairs:
+                    pair_data = pair.to_dict()
+                    
+                    # Add user message
+                    user_msg_id = f"msg_{message_counter}"
+                    messages[user_msg_id] = {
+                        'role': 'user',
+                        'content': pair_data.get('user', ''),
+                        'timestamp': pair_data.get('timestamp'),
+                        'emotionDetected': pair_data.get('emotion_detected') or pair_data.get('emotionDetected'),
+                        'urgencyLevel': pair_data.get('urgency_level') or pair_data.get('urgencyLevel', 1)
+                    }
+                    message_counter += 1
+                    
+                    # Add assistant message
+                    assistant_msg_id = f"msg_{message_counter}"
+                    messages[assistant_msg_id] = {
+                        'role': 'assistant',
+                        'content': pair_data.get('model', ''),
+                        'timestamp': pair_data.get('timestamp')
+                    }
+                    message_counter += 1
+                
+                conversation['messages'] = messages
                 return conversation
             
             return None
@@ -406,12 +430,11 @@ class FirebaseManager:
     
     def store_daily_summary(self, email: str, date_str: str, summary: dict):
         """Store a daily conversation summary."""
-        if not self.db_ref:
+        if not self.db:
             return
         
         try:
-            email_key = self._email_to_key(email)
-            self.db_ref.child('users').child(email_key).child('summaries').child('daily').child(date_str).set(summary)
+            self.db.collection('users').document(email).collection('summaries').document(f'daily_{date_str}').set(summary)
             print(f"SUCCESS: Stored daily summary for {email} on {date_str}")
             
         except Exception as e:
@@ -419,18 +442,42 @@ class FirebaseManager:
     
     def get_daily_summary(self, email: str, date_str: str) -> Optional[dict]:
         """Get daily summary for a specific date."""
-        if not self.db_ref:
+        if not self.db:
             return None
         
         try:
-            email_key = self._email_to_key(email)
-            summary = self.db_ref.child('users').child(email_key).child('summaries').child('daily').child(date_str).get()
-            return summary
+            doc_ref = self.db.collection('users').document(email).collection('summaries').document(f'daily_{date_str}')
+            doc = doc_ref.get()
+            
+            if doc.exists:
+                return doc.to_dict()
+            return None
             
         except Exception as e:
             print(f"ERROR: Error getting daily summary: {e}")
             return None
     
+    def get_all_summaries(self, email: str) -> List[Dict]:
+        """Get all conversation summaries for a user, ordered by date."""
+        if not self.db:
+            return []
+        
+        try:
+            summaries_ref = self.db.collection('users').document(email).collection('summaries')
+            summaries = summaries_ref.order_by('date', direction=firestore.Query.DESCENDING).stream()
+            
+            summary_list = []
+            for doc in summaries:
+                summary_data = doc.to_dict()
+                summary_data['document_id'] = doc.id
+                summary_list.append(summary_data)
+            
+            return summary_list
+            
+        except Exception as e:
+            print(f"ERROR: Error getting all summaries: {e}")
+            return []
+
     def find_user_by_name(self, name: str) -> Optional[UserProfile]:
         """Find user profile by name (case insensitive)."""
         try:
@@ -438,8 +485,7 @@ class FirebaseManager:
             name_lower = name.lower()
             
             for profile in all_profiles.values():
-                if (profile.name and profile.name.lower() == name_lower) or \
-                   (profile.display_name and profile.display_name.lower() == name_lower):
+                if profile.name and profile.name.lower() == name_lower:
                     return profile
             
             return None

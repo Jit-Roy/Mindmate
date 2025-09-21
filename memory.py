@@ -2,9 +2,31 @@ import json
 import asyncio
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
-from models import ConversationMemory, ConversationMessage, UserProfile
+from models import ConversationMemory, ChatPair, UserProfile
 from config import config
 from firebase_manager import firebase_manager
+
+
+class SimpleMessage:
+    """Simple message class for backward compatibility."""
+    def __init__(self, role: str, content: str, timestamp: datetime = None, 
+                 emotion_detected: str = None, urgency_level: int = 1):
+        self.role = role
+        self.content = content
+        
+        # Ensure timestamp is timezone-aware
+        if timestamp is None:
+            from datetime import timezone
+            self.timestamp = datetime.now(timezone.utc)
+        elif hasattr(timestamp, 'tzinfo') and timestamp.tzinfo is None:
+            # Make timezone-naive timestamp timezone-aware (UTC)
+            from datetime import timezone
+            self.timestamp = timestamp.replace(tzinfo=timezone.utc)
+        else:
+            self.timestamp = timestamp
+            
+        self.emotion_detected = emotion_detected
+        self.urgency_level = urgency_level
 
 
 class MemoryManager:
@@ -31,16 +53,10 @@ class MemoryManager:
         
         # Try to get lastInteraction from profiles table
         try:
-            user_key = email.replace('.', '_').replace('@', '_at_')
-            profiles_data = firebase_manager.db_ref.child("profiles").child(user_key).get()
-            
-            if profiles_data and 'lastInteraction' in profiles_data:
-                from datetime import datetime
-                last_interaction_str = profiles_data['lastInteraction']
-                profile.last_interaction = datetime.fromisoformat(last_interaction_str)
-            
+            # Note: No longer tracking lastInteraction - removed for simplification
+            pass
         except Exception as e:
-            # Silently handle lastInteraction read errors - not critical for functionality
+            # Silently handle any errors - not critical for functionality
             pass
         
         # Cache locally for performance
@@ -66,79 +82,101 @@ class MemoryManager:
             for key, value in updates.items():
                 if hasattr(profile, key):
                     setattr(profile, key, value)
-            profile.last_interaction = datetime.now()
     
     def create_conversation(self, email: str) -> ConversationMemory:
         """Create a new conversation memory."""
         conversation_id = f"{email}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         conversation = ConversationMemory(
-            conversation_id=conversation_id,
-            user_id=email
+            conversation_id=conversation_id
         )
         self.conversations[conversation_id] = conversation
         return conversation
     
     def add_message(self, email: str, role: str, content: str, 
-                   emotion_detected: str = None, urgency_level: int = 1) -> ConversationMemory:
-        """Add a message to the conversation."""
-        # Add to Firebase only
-        firebase_manager.add_message(email, role, content, emotion_detected, urgency_level)
+                   emotion_detected: str = None, urgency_level: int = 1) -> None:
+        """Add a message to the conversation using chat pairs."""
+        # Store the message temporarily for chat pair formation
+        if not hasattr(self, '_temp_user_message'):
+            self._temp_user_message = {}
         
-        # For local cache, create a simple conversation object
-        # This is just for immediate access, real data comes from Firebase
-        current_conv = self.get_current_conversation(email)
-        if not current_conv:
-            conversation_id = f"conv_{email}_{datetime.now().strftime('%Y%m%d')}"
-            current_conv = ConversationMemory(
-                conversation_id=conversation_id,
-                user_id=email
+        if role == "user":
+            # Store user message temporarily
+            self._temp_user_message[email] = {
+                'content': content,
+                'emotion_detected': emotion_detected,
+                'urgency_level': urgency_level
+            }
+        elif role == "assistant" and email in self._temp_user_message:
+            # Create chat pair when we have both user and assistant messages
+            user_msg = self._temp_user_message[email]
+            firebase_manager.add_chat_pair(
+                email=email,
+                user_message=user_msg['content'],
+                model_response=content,
+                emotion_detected=user_msg.get('emotion_detected'),
+                urgency_level=user_msg.get('urgency_level', 1)
             )
-            self.conversations[conversation_id] = current_conv
-        
-        message = ConversationMessage(
-            role=role,
-            content=content,
-            emotion_detected=emotion_detected,
-            urgency_level=urgency_level
-        )
-        
-        current_conv.messages.append(message)
-        current_conv.updated_at = datetime.now()
-        
-        return current_conv
+            # Clear temporary storage
+            del self._temp_user_message[email]
+        else:
+            # Fallback: just add to Firebase using deprecated method
+            firebase_manager.add_message(email, role, content, emotion_detected, urgency_level)
     
     def get_current_conversation(self, email: str) -> ConversationMemory:
         """Get the most recent conversation for a user."""
-        user_conversations = [
-            conv for conv in self.conversations.values() 
-            if conv.user_id == email
-        ]
-        if user_conversations:
-            return max(user_conversations, key=lambda x: x.updated_at)
-        return None
+        # Since we simplified ConversationMemory, create a simple one if needed
+        conversation_id = f"conv_{email}_{datetime.now().strftime('%Y%m%d')}"
+        if conversation_id not in self.conversations:
+            self.conversations[conversation_id] = ConversationMemory(
+                conversation_id=conversation_id
+            )
+        return self.conversations[conversation_id]
     
-    def get_recent_messages(self, email: str, limit: int = 10) -> List[ConversationMessage]:
-        """Get recent messages for context from Firebase."""
-        # Get recent messages directly from Firebase
-        messages_data = firebase_manager.get_recent_messages(email, limit)
+    def get_recent_messages(self, email: str, limit: int = 10) -> List[SimpleMessage]:
+        """Get recent messages for context from Firebase using chat pairs."""
+        # Get recent chat pairs from Firebase
+        chat_pairs = firebase_manager.get_recent_chat(email, limit // 2)  # Each pair has 2 messages
         
-        # Convert dictionaries to ConversationMessage objects
+        # Convert chat pairs to SimpleMessage objects for backward compatibility
         messages = []
-        for msg_data in messages_data:
+        for chat_pair in chat_pairs:
             try:
-                message = ConversationMessage(
-                    role=msg_data.get('role', 'user'),
-                    content=msg_data.get('content', ''),
-                    timestamp=datetime.fromisoformat(msg_data['timestamp']) if msg_data.get('timestamp') else datetime.now(),
-                    emotion_detected=msg_data.get('emotion_detected'),
-                    urgency_level=msg_data.get('urgency_level', 1)
+                # Ensure timestamp is timezone-aware
+                timestamp = chat_pair.timestamp
+                if timestamp and hasattr(timestamp, 'replace') and timestamp.tzinfo is None:
+                    # Make timezone-naive timestamps timezone-aware (UTC)
+                    from datetime import timezone
+                    timestamp = timestamp.replace(tzinfo=timezone.utc)
+                elif not timestamp:
+                    # If no timestamp, use current time as timezone-aware
+                    from datetime import timezone
+                    timestamp = datetime.now(timezone.utc)
+                
+                # Add user message
+                user_msg = SimpleMessage(
+                    role="user",
+                    content=chat_pair.user,
+                    timestamp=timestamp,
+                    emotion_detected=chat_pair.emotion_detected,
+                    urgency_level=chat_pair.urgency_level
                 )
-                messages.append(message)
+                messages.append(user_msg)
+                
+                # Add model response
+                model_msg = SimpleMessage(
+                    role="assistant",
+                    content=chat_pair.model,
+                    timestamp=timestamp
+                )
+                messages.append(model_msg)
+                
             except Exception as e:
-                # Skip invalid messages silently
+                # Skip invalid pairs silently
                 continue
         
-        return messages
+        # Sort by timestamp and return most recent
+        messages.sort(key=lambda x: x.timestamp, reverse=True)
+        return messages[:limit]
     
     def summarize_conversation(self, conversation_id: str):
         """Create a summary of the conversation to manage memory."""
@@ -173,38 +211,25 @@ class MemoryManager:
         recent_messages = self.get_recent_messages(email, 5)
         current_conv = self.get_current_conversation(email)
         
-        now = datetime.now()
+        # Use timezone-aware datetime to match Firebase timestamps
+        from datetime import timezone
+        now = datetime.now(timezone.utc)
         
-        # Start with user profile and temporal context
-        context = f"User Profile: {profile.display_name or 'friend'}"
-        
-        # Add temporal awareness about user's interaction patterns
-        if profile.last_interaction:
-            time_since_last = now - profile.last_interaction
-            if time_since_last.days > 0:
-                context += f"\n⏰ IMPORTANT TIME CONTEXT: Last conversation was {time_since_last.days} day(s) ago"
-                if time_since_last.days == 1:
-                    context += " (yesterday)"
-                elif time_since_last.days >= 3:
-                    context += f" - user has been away for {time_since_last.days} days"
-                
-                # Only include summary on first chat of the day
-                if self._is_first_chat_of_day(email):
-                    last_summary = self._get_last_conversation_summary(email)
-                    if last_summary:
-                        summary_date = last_summary.get('date', 'unknown')
-                        summary_text = last_summary.get('summary_text', '')
-                        context += f"\n📋 Last conversation summary ({summary_date}): {summary_text}"
-                    
-            elif time_since_last.seconds > 3600:
-                hours_ago = time_since_last.seconds // 3600
-                context += f"\n⏰ TIME CONTEXT: Last conversation was {hours_ago} hour(s) ago"
+        # Start with user profile and current context
+        context = f"User Profile: {profile.name or 'friend'}"
         
         # Add current date/time context for the AI
         context += f"\n📅 Current date/time: {now.strftime('%A, %B %d, %Y at %I:%M %p')}"
         
-        if profile.mental_health_concerns:
-            context += f"\nPrevious concerns: {', '.join(profile.mental_health_concerns[:3])}"
+        # Check if this is the first chat of the day and include summary
+        if self._is_first_chat_of_day(email):
+            last_summary = self._get_last_conversation_summary(email)
+            if last_summary:
+                summary_date = last_summary.get('date', 'unknown')
+                summary_text = last_summary.get('summary_text', '')
+                context += f"\n📋 Last conversation summary ({summary_date}): {summary_text}"
+        
+        # Removed mental_health_concerns since UserProfile no longer has this field
         
         if current_conv and current_conv.summary:
             context += f"\nConversation Summary: {current_conv.summary}"
