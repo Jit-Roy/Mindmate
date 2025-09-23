@@ -79,27 +79,12 @@ class SummaryManager:
             print(f"ERROR: Error getting daily summary: {e}")
             return None
     
-    def generate_conversation_summary(self, email: str, conversation_date: Optional[date] = None) -> Optional[dict]:
+    def generate_conversation_summary(self, email: str, conversation_date: date) -> Optional[dict]:
         """Generate or retrieve AI summary of a day's conversation using LLM."""
         # Import here to avoid circular import
         from message import message_manager
         
-        # If no date provided, get the last conversation date
-        if conversation_date is None:
-            conversation_date = message_manager.get_last_conversation_date(email)
-            if not conversation_date:
-                return None
-        
         date_str = conversation_date.strftime('%Y%m%d')
-        today_str = date.today().strftime('%Y%m%d')
-        
-        # Only generate if it's not today (today's conversation is ongoing)
-        if date_str == today_str:
-            return None
-            
-        # Check if summary already exists
-        if self.daily_summary_exists(email, date_str):
-            return self.get_daily_summary(email, date_str)
         
         # Get conversation data for the specified date
         conversation_data = message_manager.get_conversation_by_date(email, date_str)
@@ -110,23 +95,13 @@ class SummaryManager:
         # Build conversation text from MessagePair objects
         message_pairs = conversation_data.chat
         conversation_text = ""
-        emotions = []
-        urgency_levels = []
         
         for message_pair in message_pairs:
             if isinstance(message_pair, MessagePair):
-                # Extract user message info
                 user_content = message_pair.user_message.content
                 llm_content = message_pair.llm_message.content
-                
                 conversation_text += f"User: {user_content}\n"
                 conversation_text += f"Assistant: {llm_content}\n"
-                
-                # Collect emotional data
-                if message_pair.user_message.emotion_detected:
-                    emotions.append(message_pair.user_message.emotion_detected)
-                if message_pair.user_message.urgency_level:
-                    urgency_levels.append(message_pair.user_message.urgency_level)
         
         if not conversation_text.strip():
             return None
@@ -164,18 +139,11 @@ class SummaryManager:
             
             summary = {
                 "date": conversation_date.strftime('%Y-%m-%d'),
-                "summary_text": summary_text,
-                "emotion_trend": list(set(emotions)) if emotions else [],
-                "avg_urgency": sum(urgency_levels) / len(urgency_levels) if urgency_levels else 1,
-                "message_count": len(message_pairs)
+                "summary_text": summary_text
             }
-            
-            # Store the generated summary
-            self.store_daily_summary(email, date_str, summary)
             return summary
             
         except Exception as e:
-            # Silently handle summary generation errors - not critical for chat functionality
             print(f"Warning: Could not generate summary: {e}")
             return None
 
