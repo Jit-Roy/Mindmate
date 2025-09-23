@@ -1,8 +1,6 @@
-import json
-import asyncio
-from typing import List, Dict, Any, Optional, Union
+from typing import List, Dict
 from datetime import datetime, timezone
-from data import ConversationMemory, MessagePair, UserProfile, UserMessage, LLMMessage
+from data import ConversationMemory, MessagePair, UserProfile
 from config import config
 from firebase_manager import firebase_manager
 from summary import summary_manager
@@ -96,7 +94,6 @@ class MessageManager:
     def _is_first_chat_of_day(self, email: str) -> bool:
         """Check if this is the first chat of the current day."""
         try:
-            # Get today's conversation data
             today_str = datetime.now().strftime('%Y%m%d')
             today_conv = summary_manager.get_conversation_by_date(email, today_str)
             

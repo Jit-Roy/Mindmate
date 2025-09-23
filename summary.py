@@ -7,10 +7,11 @@ import os
 from datetime import datetime, date
 from typing import List, Dict, Any, Optional
 import firebase_admin
-from firebase_admin import credentials, firestore
+from firebase_admin import firestore
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import SystemMessage, HumanMessage
 from config import config
+from data import MessagePair, UserMessage, LLMMessage, ConversationMemory
 
 
 class SummaryManager:
@@ -54,7 +55,7 @@ class SummaryManager:
             return False
     
     def get_conversation_by_date(self, email: str, date_str: str) -> Optional[dict]:
-        """Get conversation data for a specific date, including chat pairs as messages."""
+        """Get conversation data for a specific date, returning MessagePair objects."""
         if not self.db:
             return None
         
@@ -67,37 +68,45 @@ class SummaryManager:
                 conversation = doc.to_dict()
                 conversation['date'] = date_str
                 
-                # Get chat pairs and convert them to messages format for summarization
+                # Get chat pairs and convert them to MessagePair objects
                 chat_ref = doc_ref.collection('chat')
                 pairs = list(chat_ref.order_by('timestamp').stream())
                 
-                messages = {}
-                message_counter = 1
+                message_pairs = []
                 
                 for pair in pairs:
                     pair_data = pair.to_dict()
                     
-                    # Add user message
-                    user_msg_id = f"msg_{message_counter}"
-                    messages[user_msg_id] = {
-                        'role': 'user',
-                        'content': pair_data.get('user', ''),
-                        'timestamp': pair_data.get('timestamp'),
-                        'emotionDetected': pair_data.get('emotion_detected') or pair_data.get('emotionDetected'),
-                        'urgencyLevel': pair_data.get('urgency_level') or pair_data.get('urgencyLevel', 1)
-                    }
-                    message_counter += 1
-                    
-                    # Add assistant message
-                    assistant_msg_id = f"msg_{message_counter}"
-                    messages[assistant_msg_id] = {
-                        'role': 'assistant',
-                        'content': pair_data.get('model', ''),
-                        'timestamp': pair_data.get('timestamp')
-                    }
-                    message_counter += 1
+                    try:
+                        # Create UserMessage
+                        user_message = UserMessage(
+                            content=pair_data.get('user', ''),
+                            emotion_detected=pair_data.get('emotion_detected') or pair_data.get('emotionDetected'),
+                            urgency_level=pair_data.get('urgency_level') or pair_data.get('urgencyLevel', 1)
+                        )
+                        
+                        # Create LLMMessage  
+                        llm_message = LLMMessage(
+                            content=pair_data.get('model', ''),
+                            suggestions=pair_data.get('suggestions', []),
+                            follow_up_questions=pair_data.get('follow_up_questions', [])
+                        )
+                        
+                        # Create MessagePair
+                        message_pair = MessagePair(
+                            user_message=user_message,
+                            llm_message=llm_message,
+                            timestamp=pair_data.get('timestamp', datetime.now()),
+                            conversation_id=conversation_id
+                        )
+                        
+                        message_pairs.append(message_pair)
+                        
+                    except Exception as e:
+                        print(f"Warning: Could not parse message pair: {e}")
+                        continue
                 
-                conversation['messages'] = messages
+                conversation['message_pairs'] = message_pairs
                 return conversation
             
             return None
@@ -200,7 +209,7 @@ class SummaryManager:
             if date_str != today_str and not self.daily_summary_exists(email, date_str):
                 conversation_data = self.get_conversation_by_date(email, date_str)
                 
-                if conversation_data and len(conversation_data.get('messages', {})) > 0:
+                if conversation_data and len(conversation_data.get('message_pairs', [])) > 0:
                     # Generate summary for the last conversation day
                     summary = self.generate_conversation_summary(email, conversation_data, last_conversation_date)
                     if summary:
@@ -212,22 +221,26 @@ class SummaryManager:
     def generate_conversation_summary(self, email: str, conversation_data: dict, conversation_date) -> Optional[dict]:
         """Generate AI summary of a day's conversation using LLM."""
         
-        # Build conversation text
-        messages = conversation_data.get('messages', {})
+        # Build conversation text from MessagePair objects
+        message_pairs = conversation_data.get('message_pairs', [])
         conversation_text = ""
         emotions = []
         urgency_levels = []
         
-        for msg_data in messages.values():
-            role = msg_data.get('role', 'unknown')
-            content = msg_data.get('content', '')
-            emotion = msg_data.get('emotionDetected')
-            urgency = msg_data.get('urgencyLevel', 1)
-            
-            conversation_text += f"{role}: {content}\n"
-            if emotion:
-                emotions.append(emotion)
-            urgency_levels.append(urgency)
+        for message_pair in message_pairs:
+            if isinstance(message_pair, MessagePair):
+                # Extract user message info
+                user_content = message_pair.user_message.content
+                llm_content = message_pair.llm_message.content
+                
+                conversation_text += f"User: {user_content}\n"
+                conversation_text += f"Assistant: {llm_content}\n"
+                
+                # Collect emotional data
+                if message_pair.user_message.emotion_detected:
+                    emotions.append(message_pair.user_message.emotion_detected)
+                if message_pair.user_message.urgency_level:
+                    urgency_levels.append(message_pair.user_message.urgency_level)
         
         if not conversation_text.strip():
             return None
@@ -268,11 +281,12 @@ Write a natural summary that helps remember what happened in this chat."""
                 "summary_text": summary_text,
                 "emotion_trend": list(set(emotions)) if emotions else [],
                 "avg_urgency": sum(urgency_levels) / len(urgency_levels) if urgency_levels else 1,
-                "message_count": len(messages)
+                "message_count": len(message_pairs)
             }
             
         except Exception as e:
             # Silently handle summary generation errors - not critical for chat functionality
+            print(f"Warning: Could not generate summary: {e}")
             return None
     
     def get_last_conversation_summary(self, email: str) -> Optional[dict]:
@@ -290,25 +304,47 @@ Write a natural summary that helps remember what happened in this chat."""
         
         return None
 
-    def summarize_conversation(self, conversation_id: str, messages: List[Any]) -> str:
+    def summarize_conversation(self, conversation_id: str, messages: List[MessagePair]) -> str:
         """Create a simple summary of a conversation for memory management."""
-        # Simple summarization logic
+        if not messages:
+            return "No conversation to summarize."
+        
+        # Extract mood information from MessagePair objects
         moods = []
+        urgency_levels = []
         
-        for message in messages:
-            # Handle MessagePair objects (new structure)
-            if hasattr(message, 'user_message') and hasattr(message, 'llm_message'):
+        for message_pair in messages:
+            if isinstance(message_pair, MessagePair):
                 # Extract emotion from user message
-                if hasattr(message.user_message, 'emotion_detected') and message.user_message.emotion_detected:
-                    moods.append(message.user_message.emotion_detected)
-            # Handle old-style message objects for backward compatibility
-            elif hasattr(message, 'role') and message.role == "user":
-                # Extract key information
-                if hasattr(message, 'emotion_detected') and message.emotion_detected:
-                    moods.append(message.emotion_detected)
+                if message_pair.user_message.emotion_detected:
+                    moods.append(message_pair.user_message.emotion_detected)
+                # Extract urgency level
+                if message_pair.user_message.urgency_level:
+                    urgency_levels.append(message_pair.user_message.urgency_level)
         
-        # Create summary based on emotions and basic message count
-        return f"Conversation with {len(messages)} messages. User moods: {', '.join(set(moods[-5:]))}"
+        # Create summary with meaningful information
+        mood_summary = f"User moods: {', '.join(set(moods[-5:]))}" if moods else "No mood data"
+        avg_urgency = sum(urgency_levels) / len(urgency_levels) if urgency_levels else 1
+        urgency_note = f"Average urgency: {avg_urgency:.1f}/5" if urgency_levels else ""
+        
+        summary_parts = [
+            f"Conversation with {len(messages)} message pairs",
+            mood_summary
+        ]
+        
+        if urgency_note:
+            summary_parts.append(urgency_note)
+        
+        return ". ".join(summary_parts) + "."
+
+    def create_conversation_memory(self, conversation_id: str, message_pairs: List[MessagePair]) -> ConversationMemory:
+        """Create a ConversationMemory object from MessagePair objects."""
+        return ConversationMemory(
+            conversation_id=conversation_id,
+            chat=message_pairs,
+            summary=self.summarize_conversation(conversation_id, message_pairs),
+            key_topics=[]  # Could be enhanced to extract topics from conversation
+        )
 
 
 # Global summary manager instance

@@ -14,9 +14,6 @@ firebase_manager = FirebaseManager()
 message_manager = MessageManager()
 chatbot = MentalHealthChatbot()
 
-
-
-
 def android_chat(user_prompt, user_email="arientific@gmail.com"):
     try:
         user_profile = firebase_manager.get_user_profile(user_email)
@@ -124,4 +121,3 @@ def android_chat(user_prompt, user_email="arientific@gmail.com"):
         
     except Exception as e:
         return f"Sorry, I'm having technical difficulties. Please try again later. Error: {e}"
-
