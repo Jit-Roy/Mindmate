@@ -3,7 +3,7 @@ import os
 sys.path.append(os.getcwd())
 
 from chatbot import MentalHealthChatbot
-from message import MemoryManager
+from message import MessageManager
 from firebase_manager import FirebaseManager
 from summary import summary_manager
 import json
@@ -11,7 +11,7 @@ from datetime import datetime
 
 # Initialize all components
 firebase_manager = FirebaseManager()
-memory_manager = MemoryManager()
+message_manager = MessageManager()
 chatbot = MentalHealthChatbot()
 
 
@@ -41,8 +41,8 @@ def android_chat(user_prompt, user_email="arientific@gmail.com"):
 
 
         chatbot._detect_important_events(user_prompt, user_email)
-        context = memory_manager.get_conversation_context(user_email)
-        recent_messages = memory_manager.get_recent_messages(user_email, 20)
+        context = message_manager.get_conversation_context(user_email)
+        recent_messages = message_manager.get_recent_messages(user_email, 20)
         conversation_depth = len(recent_messages) if recent_messages else 0
         
         if urgency_level >= 5:

@@ -296,7 +296,13 @@ Write a natural summary that helps remember what happened in this chat."""
         moods = []
         
         for message in messages:
-            if hasattr(message, 'role') and message.role == "user":
+            # Handle MessagePair objects (new structure)
+            if hasattr(message, 'user_message') and hasattr(message, 'llm_message'):
+                # Extract emotion from user message
+                if hasattr(message.user_message, 'emotion_detected') and message.user_message.emotion_detected:
+                    moods.append(message.user_message.emotion_detected)
+            # Handle old-style message objects for backward compatibility
+            elif hasattr(message, 'role') and message.role == "user":
                 # Extract key information
                 if hasattr(message, 'emotion_detected') and message.emotion_detected:
                     moods.append(message.emotion_detected)

@@ -1,33 +1,14 @@
 import json
 import asyncio
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 from datetime import datetime, timezone
-from data import ConversationMemory, MessagePair, UserProfile
+from data import ConversationMemory, MessagePair, UserProfile, UserMessage, LLMMessage
 from config import config
 from firebase_manager import firebase_manager
 from summary import summary_manager
 
 
-class Message:
-    """Message class for backward compatibility."""
-    def __init__(self, role: str, content: str, timestamp: datetime = None, emotion_detected: str = None, urgency_level: int = 1):
-
-        self.role = role
-        self.content = content
-        
-        # Ensure timestamp is timezone-aware
-        if timestamp is None:
-            self.timestamp = datetime.now(timezone.utc)
-        elif hasattr(timestamp, 'tzinfo') and timestamp.tzinfo is None:
-            self.timestamp = timestamp.replace(tzinfo=timezone.utc)
-        else:
-            self.timestamp = timestamp
-            
-        self.emotion_detected = emotion_detected
-        self.urgency_level = urgency_level
-
-
-class MemoryManager:
+class MessageManager:
     """Manages conversation memory, user profiles, and chat history using Firebase."""
     
     def __init__(self):
@@ -56,51 +37,11 @@ class MemoryManager:
             )
         return self.conversations[conversation_id]
     
-    def get_recent_messages(self, email: str, limit: int = 10) -> List[Message]:
-        """Get recent messages for context from Firebase using chat pairs."""
+    def get_recent_messages(self, email: str, limit: int = 10) -> List[MessagePair]:
+        """Get recent message pairs for context from Firebase."""
         # Get recent chat pairs from Firebase
-        chat_pairs = firebase_manager.get_recent_chat(email, limit // 2)  # Each pair has 2 messages
-        
-        # Convert chat pairs to Message objects for backward compatibility
-        messages = []
-        for chat_pair in chat_pairs:
-            try:
-                # Ensure timestamp is timezone-aware
-                timestamp = chat_pair.timestamp
-                if timestamp and hasattr(timestamp, 'replace') and timestamp.tzinfo is None:
-                    # Make timezone-naive timestamps timezone-aware (UTC)
-                    from datetime import timezone
-                    timestamp = timestamp.replace(tzinfo=timezone.utc)
-                elif not timestamp:
-                    # If no timestamp, use current time as timezone-aware
-                    from datetime import timezone
-                    timestamp = datetime.now(timezone.utc)
-                
-                # Add user message
-                user_msg = Message(
-                    role="user",
-                    content=chat_pair.user,
-                    timestamp=timestamp,
-                    emotion_detected=chat_pair.emotion_detected,
-                    urgency_level=chat_pair.urgency_level
-                )
-                messages.append(user_msg)
-                
-                # Add model response
-                model_msg = Message(
-                    role="assistant",
-                    content=chat_pair.model,
-                    timestamp=timestamp
-                )
-                messages.append(model_msg)
-                
-            except Exception as e:
-                # Skip invalid pairs silently
-                continue
-        
-        # Sort by timestamp and return most recent
-        messages.sort(key=lambda x: x.timestamp, reverse=True)
-        return messages[:limit]
+        chat_pairs = firebase_manager.get_recent_chat(email, limit)
+        return chat_pairs
     
     def get_conversation_context(self, email: str) -> str:
         """Get formatted conversation context for the LLM including temporal awareness."""
@@ -136,9 +77,11 @@ class MemoryManager:
         
         if recent_messages:
             context += "\nRecent conversation with timestamps:\n"
-            for msg in recent_messages[-5:]:  # Show more recent messages with time
-                time_ago = self._format_time_ago(msg.timestamp, now)
-                context += f"{msg.role} ({time_ago}): {msg.content[:100]}...\n"
+            for msg_pair in recent_messages[-5:]:  # Show more recent messages with time
+                time_ago = self._format_time_ago(msg_pair.timestamp, now)
+                # Show both user and LLM messages from the pair
+                context += f"User ({time_ago}): {msg_pair.user_message.content[:100]}...\n"
+                context += f"LLM ({time_ago}): {msg_pair.llm_message.content[:100]}...\n"
         
         return context
     
@@ -178,5 +121,5 @@ class MemoryManager:
             # If we can't determine, assume it's not the first chat to be safe
             return False
 
-# Global memory manager instance
-memory_manager = MemoryManager()
+# Global message manager instance
+message_manager = MessageManager()

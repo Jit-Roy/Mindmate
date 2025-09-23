@@ -4,8 +4,8 @@ from datetime import datetime, date
 from typing import List, Optional
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
-from data import ChatResponse, MessagePair, Event
-from message import MemoryManager
+from data import MessagePair, Event, UserMessage, LLMMessage
+from message import MessageManager
 from filter import MentalHealthFilter
 from config import config
 from firebase_manager import firebase_manager
@@ -24,7 +24,7 @@ class MentalHealthChatbot:
             max_tokens=config.max_tokens
         )
         
-        self.memory_manager = MemoryManager()
+        self.message_manager = MessageManager()
         self.health_filter = MentalHealthFilter()
         
         self.system_prompt = self._create_system_prompt()
@@ -105,7 +105,7 @@ class MentalHealthChatbot:
 
         Remember: You can be caring and supportive without being aggressive. Save the intense, protective energy for when someone actually needs saving."""
 
-    async def chat(self, email: str, message: str) -> ChatResponse:
+    async def chat(self, email: str, message: str) -> LLMMessage:
         """Main chat method that processes user input and generates response."""
         
         # Check if we should generate a proactive greeting first
@@ -129,9 +129,8 @@ class MentalHealthChatbot:
                 urgency_level=urgency_level
             )
             
-            return ChatResponse(
-                message=redirect_response,
-                emotion_tone="neutral",
+            return LLMMessage(
+                content=redirect_response,
                 suggestions=["Tell me how you're feeling today", "Share what's on your mind"],
                 follow_up_questions=["How are you doing emotionally?", "What's been on your mind lately?"]
             )
@@ -143,7 +142,7 @@ class MentalHealthChatbot:
         self._detect_important_events(message, email)
         
         # Get conversation context BEFORE adding the current message
-        context = self.memory_manager.get_conversation_context(email)
+        context = self.message_manager.get_conversation_context(email)
         user_profile = firebase_manager.get_user_profile(email)
         
         # Check if this is a crisis situation - only trigger for urgency level 5 (extreme)
@@ -162,7 +161,7 @@ class MentalHealthChatbot:
         
         # Build conversation for LLM
         conversation_history = self._build_conversation_history(email)
-        recent_messages = self.memory_manager.get_recent_messages(email, 20)
+        recent_messages = self.message_manager.get_recent_messages(email, 20)
         conversation_depth = len(recent_messages)
         
         # Create the prompt with context
@@ -233,9 +232,8 @@ class MentalHealthChatbot:
                 urgency_level=urgency_level
             )
             
-            return ChatResponse(
-                message=bot_message,
-                emotion_tone=emotion,
+            return LLMMessage(
+                content=bot_message,
                 suggestions=suggestions,
                 follow_up_questions=follow_up_questions
             )
@@ -255,14 +253,13 @@ class MentalHealthChatbot:
                 urgency_level=urgency_level
             )
             
-            return ChatResponse(
-                message=error_message,
-                emotion_tone="supportive",
+            return LLMMessage(
+                content=error_message,
                 suggestions=error_suggestions,
                 follow_up_questions=error_questions
             )
 
-    def _handle_crisis_situation(self, message: str, user_name: str) -> ChatResponse:
+    def _handle_crisis_situation(self, message: str, user_name: str) -> LLMMessage:
         """Handle crisis situations with immediate support and resources using LLM."""
         name = user_name or "friend"
         
@@ -273,9 +270,8 @@ class MentalHealthChatbot:
         suggestions = self._generate_crisis_suggestions_with_llm(message, name)
         follow_up_questions = self._generate_crisis_follow_up_questions_with_llm(message, name)
         
-        return ChatResponse(
-            message=crisis_message,
-            emotion_tone="urgent",
+        return LLMMessage(
+            content=crisis_message,
             suggestions=suggestions,
             follow_up_questions=follow_up_questions
         )
@@ -418,14 +414,14 @@ Listen to me: You're in crisis right now, and that's okay - it happens to the st
 
     def _build_conversation_history(self, email: str) -> List:
         """Build conversation history for the LLM."""
-        recent_messages = self.memory_manager.get_recent_messages(email, 10)
+        recent_messages = self.message_manager.get_recent_messages(email, 10)
         
         langchain_messages = []
-        for msg in recent_messages:
-            if msg.role == "user":
-                langchain_messages.append(HumanMessage(content=msg.content))
-            elif msg.role == "assistant":
-                langchain_messages.append(AIMessage(content=msg.content))
+        for msg_pair in recent_messages:
+            # Add user message
+            langchain_messages.append(HumanMessage(content=msg_pair.user_message.content))
+            # Add LLM message
+            langchain_messages.append(AIMessage(content=msg_pair.llm_message.content))
         
         return langchain_messages
 
@@ -659,15 +655,15 @@ Listen to me: You're in crisis right now, and that's okay - it happens to the st
         name = user_name or "friend"
         
         # Get conversation context
-        recent_messages = self.memory_manager.get_recent_messages(email, 10)
+        recent_messages = self.message_manager.get_recent_messages(email, 10)
         conversation_depth = len(recent_messages)
         
         # Build conversation history for context
         conversation_context = ""
         if recent_messages:
-            for msg in recent_messages[-5:]:  # Last 5 messages for context
-                role = "User" if msg.role == "user" else "Assistant"
-                conversation_context += f"{role}: {msg.content}\n"
+            for msg_pair in recent_messages[-5:]:  # Last 5 messages for context
+                conversation_context += f"User: {msg_pair.user_message.content}\n"
+                conversation_context += f"Assistant: {msg_pair.llm_message.content}\n"
         
         system_prompt = f"""You are a caring mental health companion generating thoughtful follow-up questions. Based on the user's current emotional state, conversation history, and relationship depth, create 2-3 empathetic follow-up questions that:
 

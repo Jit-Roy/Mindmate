@@ -11,7 +11,7 @@ from typing import List, Dict, Any, Optional
 import firebase_admin
 from firebase_admin import credentials, firestore
 from google.cloud.firestore import FieldFilter
-from data import UserProfile, MessagePair, Event
+from data import UserProfile, MessagePair, Event, UserMessage, LLMMessage
 
 # Load environment variables
 from dotenv import load_dotenv
@@ -171,12 +171,22 @@ class FirebaseManager:
             for doc in chat:
                 pair_data = doc.to_dict()
                 # Create MessagePair object from the data (handle both formats for compatibility)
-                chat_pair = MessagePair(
-                    user=pair_data.get('user', ''),
-                    model=pair_data.get('model', ''),
-                    timestamp=pair_data.get('timestamp', datetime.now()),
+                user_message = UserMessage(
+                    content=pair_data.get('user', ''),
                     emotion_detected=pair_data.get('emotion_detected') or pair_data.get('emotionDetected'),
                     urgency_level=pair_data.get('urgency_level') or pair_data.get('urgencyLevel', 1)
+                )
+                
+                llm_message = LLMMessage(
+                    content=pair_data.get('model', ''),
+                    suggestions=pair_data.get('suggestions', []),
+                    follow_up_questions=pair_data.get('follow_up_questions', [])
+                )
+                
+                chat_pair = MessagePair(
+                    user_message=user_message,
+                    llm_message=llm_message,
+                    timestamp=pair_data.get('timestamp', datetime.now())
                 )
                 chat_pair_list.append(chat_pair)
             
