@@ -1,6 +1,6 @@
-from typing import List, Dict
-from datetime import datetime, timezone
-from data import ConversationMemory, MessagePair, UserProfile
+from typing import List, Dict, Optional
+from datetime import datetime, timezone, date
+from data import ConversationMemory, MessagePair, UserProfile, UserMessage, LLMMessage
 from config import config
 from firebase_manager import firebase_manager
 from summary import summary_manager
@@ -38,6 +38,100 @@ class MessageManager:
         chat_pairs = firebase_manager.get_recent_chat(email, limit)
         return chat_pairs
     
+    def get_conversation_by_date(self, email: str, date_str: str) -> Optional[ConversationMemory]:
+        """Get conversation data for a specific date, returning ConversationMemory object."""
+        if not firebase_manager.db:
+            return None
+        
+        try:
+            conversation_id = f"conv_{date_str}"
+            doc_ref = firebase_manager.db.collection('users').document(email).collection('conversations').document(conversation_id)
+            doc = doc_ref.get()
+            
+            if doc.exists:
+                # Get chat pairs and convert them to MessagePair objects
+                chat_ref = doc_ref.collection('chat')
+                pairs = list(chat_ref.order_by('timestamp').stream())
+                
+                message_pairs = []
+                
+                for pair in pairs:
+                    pair_data = pair.to_dict()
+                    
+                    try:
+                        # Create UserMessage
+                        user_message = UserMessage(
+                            content=pair_data.get('user', ''),
+                            emotion_detected=pair_data.get('emotion_detected') or pair_data.get('emotionDetected'),
+                            urgency_level=pair_data.get('urgency_level') or pair_data.get('urgencyLevel', 1)
+                        )
+                        
+                        # Create LLMMessage  
+                        llm_message = LLMMessage(
+                            content=pair_data.get('model', ''),
+                            suggestions=pair_data.get('suggestions', []),
+                            follow_up_questions=pair_data.get('follow_up_questions', [])
+                        )
+                        
+                        # Create MessagePair
+                        message_pair = MessagePair(
+                            user_message=user_message,
+                            llm_message=llm_message,
+                            timestamp=pair_data.get('timestamp', datetime.now()),
+                            conversation_id=conversation_id
+                        )
+                        
+                        message_pairs.append(message_pair)
+                        
+                    except Exception as e:
+                        print(f"Warning: Could not parse message pair: {e}")
+                        continue
+                
+                # Create and return ConversationMemory object
+                conversation_memory = ConversationMemory(
+                    conversation_id=conversation_id,
+                    chat=message_pairs,
+                    summary="",
+                    key_topics=[]  
+                )
+                
+                return conversation_memory
+            
+            return None
+            
+        except Exception as e:
+            print(f"ERROR: Error getting conversation by date: {e}")
+            return None
+    
+    def get_last_conversation_date(self, email: str) -> Optional[date]:
+        """Get the date of user's last conversation."""
+        if not firebase_manager.db:
+            return None
+        
+        try:
+            conversations_ref = firebase_manager.db.collection('users').document(email).collection('conversations')
+            conversations = conversations_ref.stream()
+            
+            conversation_dates = []
+            for doc in conversations:
+                conv_id = doc.id
+                if conv_id.startswith('conv_'):
+                    date_str = conv_id.replace('conv_', '')
+                    try:
+                        conv_date = datetime.strptime(date_str, '%Y%m%d').date()
+                        conversation_dates.append(conv_date)
+                    except ValueError:
+                        continue
+            
+            if conversation_dates:
+                return max(conversation_dates)
+            
+            return None
+            
+        except Exception as e:
+            print(f"ERROR: Error getting last conversation date: {e}")
+            return None
+    
     def get_conversation_context(self, email: str) -> str:
         """Get formatted conversation context for the LLM including temporal awareness."""
         profile = firebase_manager.get_user_profile(email)
@@ -53,14 +147,11 @@ class MessageManager:
         
         # Check if this is the first chat of the day and include summary
         if self._is_first_chat_of_day(email):
-            last_summary = summary_manager.get_last_conversation_summary(email)
+            last_summary = summary_manager.generate_conversation_summary(email)
             if last_summary:
                 summary_date = last_summary.get('date', 'unknown')
                 summary_text = last_summary.get('summary_text', '')
                 context += f"\n📋 Last conversation summary ({summary_date}): {summary_text}"
-        
-        if current_conv and current_conv.summary:
-            context += f"\nConversation Summary: {current_conv.summary}"
         
         if current_conv and current_conv.key_topics:
             context += f"\nPrevious topics: {', '.join(current_conv.key_topics[:5])}"
@@ -96,10 +187,10 @@ class MessageManager:
         """Check if this is the first chat of the current day."""
         try:
             today_str = datetime.now().strftime('%Y%m%d')
-            today_conv = summary_manager.get_conversation_by_date(email, today_str)
+            today_conv = self.get_conversation_by_date(email, today_str)
             
-            # If no messages exist for today, this is the first chat
-            if not today_conv or not today_conv.get('messages'):
+            # If no conversation exists for today, this is the first chat
+            if not today_conv or not today_conv.chat:
                 return True
                 
             # If messages exist, this is not the first chat

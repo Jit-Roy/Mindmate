@@ -21,7 +21,6 @@ class SummaryManager:
         """Initialize with optional database connection."""
         self.db = db
         if not self.db:
-            # Initialize Firebase if not provided
             try:
                 if firebase_admin._apps:
                     self.db = firestore.client()
@@ -31,15 +30,12 @@ class SummaryManager:
                 print(f"ERROR: Could not initialize Firebase in SummaryManager: {e}")
                 self.db = None
         
-        # Initialize LLM for summary generation
         self.llm = ChatGoogleGenerativeAI(
             model=config.model_name,
             google_api_key=config.gemini_api_key,
-            temperature=0.5  # Slightly lower temperature for more consistent summaries
+            temperature=0.5  
         )
-    
-    # ==================== DAILY SUMMARY OPERATIONS ====================
-    
+
     def daily_summary_exists(self, email: str, date_str: str) -> bool:
         """Check if a daily summary already exists for the given date."""
         if not self.db:
@@ -53,67 +49,6 @@ class SummaryManager:
         except Exception as e:
             print(f"ERROR: Error checking daily summary existence: {e}")
             return False
-    
-    def get_conversation_by_date(self, email: str, date_str: str) -> Optional[dict]:
-        """Get conversation data for a specific date, returning MessagePair objects."""
-        if not self.db:
-            return None
-        
-        try:
-            conversation_id = f"conv_{date_str}"
-            doc_ref = self.db.collection('users').document(email).collection('conversations').document(conversation_id)
-            doc = doc_ref.get()
-            
-            if doc.exists:
-                conversation = doc.to_dict()
-                conversation['date'] = date_str
-                
-                # Get chat pairs and convert them to MessagePair objects
-                chat_ref = doc_ref.collection('chat')
-                pairs = list(chat_ref.order_by('timestamp').stream())
-                
-                message_pairs = []
-                
-                for pair in pairs:
-                    pair_data = pair.to_dict()
-                    
-                    try:
-                        # Create UserMessage
-                        user_message = UserMessage(
-                            content=pair_data.get('user', ''),
-                            emotion_detected=pair_data.get('emotion_detected') or pair_data.get('emotionDetected'),
-                            urgency_level=pair_data.get('urgency_level') or pair_data.get('urgencyLevel', 1)
-                        )
-                        
-                        # Create LLMMessage  
-                        llm_message = LLMMessage(
-                            content=pair_data.get('model', ''),
-                            suggestions=pair_data.get('suggestions', []),
-                            follow_up_questions=pair_data.get('follow_up_questions', [])
-                        )
-                        
-                        # Create MessagePair
-                        message_pair = MessagePair(
-                            user_message=user_message,
-                            llm_message=llm_message,
-                            timestamp=pair_data.get('timestamp', datetime.now()),
-                            conversation_id=conversation_id
-                        )
-                        
-                        message_pairs.append(message_pair)
-                        
-                    except Exception as e:
-                        print(f"Warning: Could not parse message pair: {e}")
-                        continue
-                
-                conversation['message_pairs'] = message_pairs
-                return conversation
-            
-            return None
-            
-        except Exception as e:
-            print(f"ERROR: Error getting conversation by date: {e}")
-            return None
     
     def store_daily_summary(self, email: str, date_str: str, summary: dict):
         """Store a daily conversation summary."""
@@ -144,85 +79,36 @@ class SummaryManager:
             print(f"ERROR: Error getting daily summary: {e}")
             return None
     
-    def get_all_summaries(self, email: str) -> List[Dict]:
-        """Get all conversation summaries for a user, ordered by date."""
-        if not self.db:
-            return []
+    def generate_conversation_summary(self, email: str, conversation_date: Optional[date] = None) -> Optional[dict]:
+        """Generate or retrieve AI summary of a day's conversation using LLM."""
+        # Import here to avoid circular import
+        from message import message_manager
         
-        try:
-            summaries_ref = self.db.collection('users').document(email).collection('summaries')
-            summaries = summaries_ref.order_by('date', direction=firestore.Query.DESCENDING).stream()
-            
-            summary_list = []
-            for doc in summaries:
-                summary_data = doc.to_dict()
-                summary_data['document_id'] = doc.id
-                summary_list.append(summary_data)
-            
-            return summary_list
-            
-        except Exception as e:
-            print(f"ERROR: Error getting all summaries: {e}")
-            return []
-    
-    def get_last_conversation_date(self, email: str) -> Optional[date]:
-        """Get the date of user's last conversation."""
-        if not self.db:
-            return None
+        # If no date provided, get the last conversation date
+        if conversation_date is None:
+            conversation_date = message_manager.get_last_conversation_date(email)
+            if not conversation_date:
+                return None
         
-        try:
-            conversations_ref = self.db.collection('users').document(email).collection('conversations')
-            conversations = conversations_ref.stream()
-            
-            conversation_dates = []
-            for doc in conversations:
-                conv_id = doc.id
-                if conv_id.startswith('conv_'):
-                    date_str = conv_id.replace('conv_', '')
-                    try:
-                        conv_date = datetime.strptime(date_str, '%Y%m%d').date()
-                        conversation_dates.append(conv_date)
-                    except ValueError:
-                        continue
-            
-            if conversation_dates:
-                return max(conversation_dates)
-            
+        date_str = conversation_date.strftime('%Y%m%d')
+        today_str = date.today().strftime('%Y%m%d')
+        
+        # Only generate if it's not today (today's conversation is ongoing)
+        if date_str == today_str:
             return None
             
-        except Exception as e:
-            print(f"ERROR: Error getting last conversation date: {e}")
+        # Check if summary already exists
+        if self.daily_summary_exists(email, date_str):
+            return self.get_daily_summary(email, date_str)
+        
+        # Get conversation data for the specified date
+        conversation_data = message_manager.get_conversation_by_date(email, date_str)
+        
+        if not conversation_data or len(conversation_data.chat) == 0:
             return None
-    
-    # ==================== SUMMARY GENERATION ====================
-    
-    def generate_daily_summary_if_needed(self, email: str) -> Optional[dict]:
-        """Generate summary for the user's last conversation day if needed."""
-        # Find the last day user had a conversation
-        last_conversation_date = self.get_last_conversation_date(email)
-        
-        if last_conversation_date:
-            date_str = last_conversation_date.strftime('%Y%m%d')
-            today_str = date.today().strftime('%Y%m%d')
-            
-            # Only generate if it's not today and summary doesn't exist
-            if date_str != today_str and not self.daily_summary_exists(email, date_str):
-                conversation_data = self.get_conversation_by_date(email, date_str)
-                
-                if conversation_data and len(conversation_data.get('message_pairs', [])) > 0:
-                    # Generate summary for the last conversation day
-                    summary = self.generate_conversation_summary(email, conversation_data, last_conversation_date)
-                    if summary:
-                        self.store_daily_summary(email, date_str, summary)
-                        return summary
-        
-        return None
-
-    def generate_conversation_summary(self, email: str, conversation_data: dict, conversation_date) -> Optional[dict]:
-        """Generate AI summary of a day's conversation using LLM."""
         
         # Build conversation text from MessagePair objects
-        message_pairs = conversation_data.get('message_pairs', [])
+        message_pairs = conversation_data.chat
         conversation_text = ""
         emotions = []
         urgency_levels = []
@@ -248,24 +134,24 @@ class SummaryManager:
         # Generate summary using LLM
         summary_prompt = f"""Summarize this conversation between a user and their mental health support friend:
 
-CONVERSATION:
-{conversation_text}
+        CONVERSATION:
+        {conversation_text}
 
-Create a friendly summary that covers:
-1. What the user talked about and how they were feeling
-2. Main topics or concerns they shared
-3. Any positive moments or progress they mentioned
-4. Important things to remember for next time you chat
-5. How they seemed to be feeling by the end
+        Create a friendly summary that covers:
+        1. What the user talked about and how they were feeling
+        2. Main topics or concerns they shared
+        3. Any positive moments or progress they mentioned
+        4. Important things to remember for next time you chat
+        5. How they seemed to be feeling by the end
 
-Keep it:
-- Simple and conversational (like notes a friend would take)
-- Under 120 words
-- Focused on what matters for continuing the friendship
-- Written like "User talked about..." or "They seemed..."
-- Remember this is for helping continue supportive conversations
+        Keep it:
+        - Simple and conversational (like notes a friend would take)
+        - Under 120 words
+        - Focused on what matters for continuing the friendship
+        - Written like "User talked about..." or "They seemed..."
+        - Remember this is for helping continue supportive conversations
 
-Write a natural summary that helps remember what happened in this chat."""
+        Write a natural summary that helps remember what happened in this chat."""
 
         try:
             messages = [
@@ -276,7 +162,7 @@ Write a natural summary that helps remember what happened in this chat."""
             response = self.llm.invoke(messages)
             summary_text = response.content.strip()
             
-            return {
+            summary = {
                 "date": conversation_date.strftime('%Y-%m-%d'),
                 "summary_text": summary_text,
                 "emotion_trend": list(set(emotions)) if emotions else [],
@@ -284,68 +170,13 @@ Write a natural summary that helps remember what happened in this chat."""
                 "message_count": len(message_pairs)
             }
             
+            # Store the generated summary
+            self.store_daily_summary(email, date_str, summary)
+            return summary
+            
         except Exception as e:
             # Silently handle summary generation errors - not critical for chat functionality
             print(f"Warning: Could not generate summary: {e}")
             return None
-    
-    def get_last_conversation_summary(self, email: str) -> Optional[dict]:
-        """Get the summary of user's last conversation day if it exists."""
-        # Find the last day user actually had conversations (not just when they were online)
-        last_conversation_date = self.get_last_conversation_date(email)
-        
-        if last_conversation_date:
-            today_date = date.today()
-            
-            # Only get summary if it's not today (today's conversation is ongoing)
-            if last_conversation_date != today_date:
-                date_str = last_conversation_date.strftime('%Y%m%d')
-                return self.get_daily_summary(email, date_str)
-        
-        return None
 
-    def summarize_conversation(self, conversation_id: str, messages: List[MessagePair]) -> str:
-        """Create a simple summary of a conversation for memory management."""
-        if not messages:
-            return "No conversation to summarize."
-        
-        # Extract mood information from MessagePair objects
-        moods = []
-        urgency_levels = []
-        
-        for message_pair in messages:
-            if isinstance(message_pair, MessagePair):
-                # Extract emotion from user message
-                if message_pair.user_message.emotion_detected:
-                    moods.append(message_pair.user_message.emotion_detected)
-                # Extract urgency level
-                if message_pair.user_message.urgency_level:
-                    urgency_levels.append(message_pair.user_message.urgency_level)
-        
-        # Create summary with meaningful information
-        mood_summary = f"User moods: {', '.join(set(moods[-5:]))}" if moods else "No mood data"
-        avg_urgency = sum(urgency_levels) / len(urgency_levels) if urgency_levels else 1
-        urgency_note = f"Average urgency: {avg_urgency:.1f}/5" if urgency_levels else ""
-        
-        summary_parts = [
-            f"Conversation with {len(messages)} message pairs",
-            mood_summary
-        ]
-        
-        if urgency_note:
-            summary_parts.append(urgency_note)
-        
-        return ". ".join(summary_parts) + "."
-
-    def create_conversation_memory(self, conversation_id: str, message_pairs: List[MessagePair]) -> ConversationMemory:
-        """Create a ConversationMemory object from MessagePair objects."""
-        return ConversationMemory(
-            conversation_id=conversation_id,
-            chat=message_pairs,
-            summary=self.summarize_conversation(conversation_id, message_pairs),
-            key_topics=[]  # Could be enhanced to extract topics from conversation
-        )
-
-
-# Global summary manager instance
 summary_manager = SummaryManager()

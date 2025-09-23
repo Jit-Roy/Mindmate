@@ -146,7 +146,7 @@ class EventManager:
         yesterday = today - timedelta(days=1)
         
         # STEP 1: Check if we need to generate yesterday's summary (first chat of new day)
-        summary_manager.generate_daily_summary_if_needed(email)
+        summary_manager.generate_conversation_summary(email)
         
         # STEP 2: Get pending events from Firebase events table
         pending_events = firebase_manager.get_pending_events(email)

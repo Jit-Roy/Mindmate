@@ -21,7 +21,7 @@ def android_chat(user_prompt, user_email="arientific@gmail.com"):
     try:
         user_profile = firebase_manager.get_user_profile(user_email)
         user_name = user_profile.name 
-        summary_manager.generate_daily_summary_if_needed(user_email)
+        summary_manager.generate_conversation_summary(user_email)
         proactive_greeting = event_manager.generate_proactive_greeting(user_email)
         topic_filter = chatbot.health_filter.filter(user_prompt)
         emotion, urgency_level = helper_manager.detect_emotion(user_prompt)
