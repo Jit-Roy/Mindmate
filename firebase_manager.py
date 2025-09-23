@@ -107,7 +107,8 @@ class FirebaseManager:
     # ==================== CONVERSATION OPERATIONS ====================
     
     def add_chat_pair(self, email: str, user_message: str, model_response: str, 
-                      emotion_detected: str = None, urgency_level: int = 1):
+                      emotion_detected: str = None, urgency_level: int = 1,
+                      suggestions: List[str] = None, follow_up_questions: List[str] = None):
         """Add a chat pair (user + model response) to Firestore."""
         if not self.db:
             return
@@ -121,7 +122,9 @@ class FirebaseManager:
                 "model": model_response,
                 "timestamp": firestore.SERVER_TIMESTAMP,
                 "emotion_detected": emotion_detected,  # Use snake_case consistently
-                "urgency_level": urgency_level         # Use snake_case consistently
+                "urgency_level": urgency_level,        # Use snake_case consistently
+                "suggestions": suggestions or [],      # Store suggestions from LLM
+                "follow_up_questions": follow_up_questions or []  # Store follow-up questions
             }
             
             # Add chat pair to user's conversation subcollection

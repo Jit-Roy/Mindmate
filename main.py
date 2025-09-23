@@ -6,6 +6,8 @@ from chatbot import MentalHealthChatbot
 from message import MessageManager
 from firebase_manager import FirebaseManager
 from summary import summary_manager
+from events import event_manager
+from crisis import crisis_manager
 import json
 from datetime import datetime
 
@@ -19,7 +21,7 @@ def android_chat(user_prompt, user_email="arientific@gmail.com"):
         user_profile = firebase_manager.get_user_profile(user_email)
         user_name = user_profile.name 
         summary_manager.generate_daily_summary_if_needed(user_email)
-        proactive_greeting = chatbot._generate_proactive_greeting(user_email)
+        proactive_greeting = event_manager.generate_proactive_greeting(user_email)
         topic_filter = chatbot.health_filter.filter(user_prompt)
         emotion, urgency_level = chatbot.health_filter.detect_emotion(user_prompt)
         
@@ -37,23 +39,23 @@ def android_chat(user_prompt, user_email="arientific@gmail.com"):
             return redirect_response
 
 
-        chatbot._detect_important_events(user_prompt, user_email)
+        event_manager.detect_important_events(user_prompt, user_email)
         context = message_manager.get_conversation_context(user_email)
         recent_messages = message_manager.get_recent_messages(user_email, 20)
         conversation_depth = len(recent_messages) if recent_messages else 0
         
         if urgency_level >= 5:
-            crisis_response = chatbot._handle_crisis_situation(user_prompt, user_name)
+            crisis_response = crisis_manager.handle_crisis_situation(user_prompt, user_name)
             
             firebase_manager.add_chat_pair(
                 email=user_email,
                 user_message=user_prompt,
-                model_response=crisis_response.message,
+                model_response=crisis_response.content,
                 emotion_detected=emotion,
                 urgency_level=urgency_level
             )
             
-            return crisis_response.message
+            return crisis_response.content
         
         conversation_history = chatbot._build_conversation_history(user_email)
         enhanced_prompt = f"""{chatbot.system_prompt}
@@ -106,7 +108,7 @@ def android_chat(user_prompt, user_email="arientific@gmail.com"):
         if proactive_greeting:
             for event_type in ['exam', 'interview', 'appointment']:
                 if event_type in proactive_greeting.lower():
-                    chatbot._mark_event_followed_up(user_email, event_type)
+                    event_manager.mark_event_followed_up(user_email, event_type)
                     break
         
         firebase_manager.add_chat_pair(
@@ -120,4 +122,11 @@ def android_chat(user_prompt, user_email="arientific@gmail.com"):
         return bot_message
         
     except Exception as e:
-        return f"Sorry, I'm having technical difficulties. Please try again later. Error: {e}"
+        try:
+            # Use crisis manager for error handling
+            user_profile = firebase_manager.get_user_profile(user_email)
+            user_name = user_profile.name
+            emotion, urgency_level = chatbot.health_filter.detect_emotion(user_prompt)
+            return crisis_manager.handle_error_response(user_prompt, emotion, urgency_level, user_name).content
+        except:
+            return f"Sorry, I'm having technical difficulties. Please try again later. Error: {e}"

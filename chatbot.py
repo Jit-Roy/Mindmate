@@ -4,12 +4,14 @@ from datetime import datetime, date
 from typing import List, Optional
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
-from data import MessagePair, Event, UserMessage, LLMMessage
+from data import MessagePair, UserMessage, LLMMessage
 from message import MessageManager
 from filter import MentalHealthFilter
 from config import config
 from firebase_manager import firebase_manager
 from summary import summary_manager
+from events import event_manager
+from crisis import crisis_manager
 
 
 
@@ -109,7 +111,7 @@ class MentalHealthChatbot:
         """Main chat method that processes user input and generates response."""
         
         # Check if we should generate a proactive greeting first
-        proactive_greeting = self._generate_proactive_greeting(email)
+        proactive_greeting = event_manager.generate_proactive_greeting(email)
         
         # Check if message is mental health related
         topic_filter = self.health_filter.filter(message)
@@ -120,26 +122,32 @@ class MentalHealthChatbot:
             # Detect emotion and urgency for the redirect response
             emotion, urgency_level = self.health_filter.detect_emotion(message)
             
+            # Define redirect suggestions and questions
+            redirect_suggestions = ["Tell me how you're feeling today", "Share what's on your mind"]
+            redirect_questions = ["How are you doing emotionally?", "What's been on your mind lately?"]
+            
             # Save the interaction with redirect using add_chat_pair
             firebase_manager.add_chat_pair(
                 email=email,
                 user_message=message,
                 model_response=redirect_response,
                 emotion_detected=emotion,
-                urgency_level=urgency_level
+                urgency_level=urgency_level,
+                suggestions=redirect_suggestions,
+                follow_up_questions=redirect_questions
             )
             
             return LLMMessage(
                 content=redirect_response,
-                suggestions=["Tell me how you're feeling today", "Share what's on your mind"],
-                follow_up_questions=["How are you doing emotionally?", "What's been on your mind lately?"]
+                suggestions=redirect_suggestions,
+                follow_up_questions=redirect_questions
             )
         
         # Detect emotion and urgency for mental health messages
         emotion, urgency_level = self.health_filter.detect_emotion(message)
         
         # Detect and store important events
-        self._detect_important_events(message, email)
+        event_manager.detect_important_events(message, email)
         
         # Get conversation context BEFORE adding the current message
         context = self.message_manager.get_conversation_context(email)
@@ -147,15 +155,17 @@ class MentalHealthChatbot:
         
         # Check if this is a crisis situation - only trigger for urgency level 5 (extreme)
         if urgency_level >= 5:
-            crisis_response = self._handle_crisis_situation(message, user_profile.name)
+            crisis_response = crisis_manager.handle_crisis_situation(message, user_profile.name)
             
             # Save crisis interaction using add_chat_pair
             firebase_manager.add_chat_pair(
                 email=email,
                 user_message=message,
-                model_response=crisis_response.message,
+                model_response=crisis_response.content,
                 emotion_detected=emotion,
-                urgency_level=urgency_level
+                urgency_level=urgency_level,
+                suggestions=crisis_response.suggestions,
+                follow_up_questions=crisis_response.follow_up_questions
             )
             return crisis_response
         
@@ -220,7 +230,7 @@ class MentalHealthChatbot:
                 # Extract event type from greeting to mark as followed up
                 for event_type in ['exam', 'interview', 'appointment']:
                     if event_type in proactive_greeting.lower():
-                        self._mark_event_followed_up(email, event_type)
+                        event_manager.mark_event_followed_up(email, event_type)
                         break
             
             # Save successful interaction using add_chat_pair
@@ -229,7 +239,9 @@ class MentalHealthChatbot:
                 user_message=message,
                 model_response=bot_message,
                 emotion_detected=emotion,
-                urgency_level=urgency_level
+                urgency_level=urgency_level,
+                suggestions=suggestions,
+                follow_up_questions=follow_up_questions
             )
             
             return LLMMessage(
@@ -240,9 +252,9 @@ class MentalHealthChatbot:
             
         except Exception as e:
             # Generate contextual error message using LLM
-            error_message = self._generate_error_response_with_llm(message, emotion, urgency_level, user_profile.name)
-            error_suggestions = self._generate_error_suggestions_with_llm(message, emotion)
-            error_questions = self._generate_error_follow_up_questions_with_llm(user_profile.name)
+            error_message = crisis_manager.generate_error_response(message, emotion, urgency_level, user_profile.name)
+            error_suggestions = crisis_manager.generate_error_suggestions(message, emotion)
+            error_questions = crisis_manager.generate_error_follow_up_questions(user_profile.name)
             
             # Save error interaction using add_chat_pair
             firebase_manager.add_chat_pair(
@@ -250,7 +262,9 @@ class MentalHealthChatbot:
                 user_message=message,
                 model_response=error_message,
                 emotion_detected=emotion,
-                urgency_level=urgency_level
+                urgency_level=urgency_level,
+                suggestions=error_suggestions,
+                follow_up_questions=error_questions
             )
             
             return LLMMessage(
@@ -258,159 +272,6 @@ class MentalHealthChatbot:
                 suggestions=error_suggestions,
                 follow_up_questions=error_questions
             )
-
-    def _handle_crisis_situation(self, message: str, user_name: str) -> LLMMessage:
-        """Handle crisis situations with immediate support and resources using LLM."""
-        name = user_name or "friend"
-        
-        # Generate crisis response using LLM
-        crisis_message = self._generate_crisis_response_with_llm(message, name)
-        
-        # Generate crisis-specific suggestions and follow-up questions
-        suggestions = self._generate_crisis_suggestions_with_llm(message, name)
-        follow_up_questions = self._generate_crisis_follow_up_questions_with_llm(message, name)
-        
-        return LLMMessage(
-            content=crisis_message,
-            suggestions=suggestions,
-            follow_up_questions=follow_up_questions
-        )
-
-    def _generate_crisis_response_with_llm(self, message: str, name: str) -> str:
-        """Generate personalized crisis intervention response using LLM."""
-        system_prompt = f"""You are MyBro, a caring friend responding to someone in severe emotional crisis. Generate a compassionate, urgent, but caring crisis intervention response that:
-
-        1. IMMEDIATELY shows deep concern and love for them
-        2. Acknowledges their pain without minimizing it
-        3. Fights against harmful thoughts with protective, loving energy
-        4. Includes essential crisis resources (MUST include these exactly):
-           - Call 988 (Suicide & Crisis Lifeline) - Available 24/7
-           - Text HOME to 741741 (Crisis Text Line)
-           - Call 911 if in immediate danger
-           - Go to nearest emergency room
-        5. Emphasizes their value and that people care about them
-        6. Shows urgency about getting help TODAY
-        7. Uses their name naturally and personally
-
-        TONE GUIDELINES:
-        - Be passionately protective, like fighting for a family member
-        - Show genuine fear for their safety while remaining strong
-        - Be direct and urgent but not clinical
-        - Challenge negative thoughts with love and reality
-        - Make it personal - this is about THEM specifically
-
-        STRUCTURE:
-        - Start with immediate, caring concern that uses their name
-        - Acknowledge their crisis and pain
-        - List the crisis resources clearly (use the exact format above)
-        - End with personal, urgent plea for them to reach out TODAY
-
-        USER CONTEXT:
-        - Name: {name}
-        - Crisis message: "{message}"
-        
-        Generate a powerful, loving crisis intervention response that could save their life."""
-
-        try:
-            messages = [
-                SystemMessage(content=system_prompt),
-                HumanMessage(content=f"Generate a crisis intervention response for {name} who said: '{message}'")
-            ]
-            
-            response = self.llm.invoke(messages)
-            return response.content.strip()
-            
-        except Exception as e:
-            # Critical fallback for crisis situations
-            return f"""{name}, I'm genuinely scared for you right now, but I also know you're stronger than this moment. You reached out to me, which means part of you is still fighting.
-
-Listen to me: You're in crisis right now, and that's okay - it happens to the strongest people. But you don't have to face this alone.
-
-**Please reach out to someone who can help immediately:**
-• **Call 988** (Suicide & Crisis Lifeline) - Available 24/7
-• **Text HOME to 741741** (Crisis Text Line)
-• **Call 911** if you're in immediate danger
-• **Go to your nearest emergency room**
-
-{name}, I need you to promise me you'll reach out to one of these resources today. Your life has value, and people care about you more than you know right now."""
-
-    def _generate_crisis_suggestions_with_llm(self, message: str, name: str) -> List[str]:
-        """Generate crisis-specific suggestions using LLM."""
-        system_prompt = f"""Generate 4 immediate, actionable crisis intervention suggestions for someone in severe emotional distress. These should be:
-
-        1. IMMEDIATE safety-focused actions they can take right now
-        2. Specific and actionable (not vague)
-        3. Appropriate for crisis level urgency
-        4. Mix of professional help and personal support
-        5. Focus on TODAY - immediate actions
-
-        USER CONTEXT:
-        - Name: {name}
-        - Crisis situation: "{message}"
-
-        Return exactly 4 suggestions, one per line, without numbering."""
-
-        try:
-            messages = [
-                SystemMessage(content=system_prompt),
-                HumanMessage(content=f"Generate crisis suggestions for {name}: '{message}'")
-            ]
-            
-            response = self.llm.invoke(messages)
-            suggestions_text = response.content.strip()
-            
-            suggestions = [s.strip() for s in suggestions_text.split('\n') if s.strip()]
-            return suggestions[:4] if len(suggestions) >= 4 else [
-                "Call 988 Suicide & Crisis Lifeline",
-                "Text HOME to 741741",
-                "Call a trusted friend or family member",
-                "Go to the nearest emergency room"
-            ]
-            
-        except Exception as e:
-            return [
-                "Call 988 Suicide & Crisis Lifeline",
-                "Text HOME to 741741", 
-                "Call a trusted friend or family member",
-                "Go to the nearest emergency room"
-            ]
-
-    def _generate_crisis_follow_up_questions_with_llm(self, message: str, name: str) -> List[str]:
-        """Generate crisis-specific follow-up questions using LLM."""
-        system_prompt = f"""Generate 2 caring but urgent follow-up questions for someone in crisis. These should:
-
-        1. Check their immediate safety and support systems
-        2. Encourage immediate action for getting help
-        3. Be personal and caring, using their name
-        4. Focus on RIGHT NOW - immediate needs
-        5. Help assess their current safety situation
-
-        USER CONTEXT:
-        - Name: {name}
-        - Crisis message: "{message}"
-
-        Return exactly 2 questions, one per line."""
-
-        try:
-            messages = [
-                SystemMessage(content=system_prompt),
-                HumanMessage(content=f"Generate crisis follow-up questions for {name}: '{message}'")
-            ]
-            
-            response = self.llm.invoke(messages)
-            questions_text = response.content.strip()
-            
-            questions = [q.strip() for q in questions_text.split('\n') if q.strip() and '?' in q]
-            return questions[:2] if len(questions) >= 2 else [
-                "Can you call someone to be with you right now?",
-                "Do you have the 988 number saved in your phone?"
-            ]
-            
-        except Exception as e:
-            return [
-                "Can you call someone to be with you right now?",
-                "Do you have the 988 number saved in your phone?"
-            ]
 
     def _build_conversation_history(self, email: str) -> List:
         """Build conversation history for the LLM."""
@@ -424,231 +285,6 @@ Listen to me: You're in crisis right now, and that's okay - it happens to the st
             langchain_messages.append(AIMessage(content=msg_pair.llm_message.content))
         
         return langchain_messages
-
-    def _detect_important_events(self, message: str, email: str) -> None:
-        """Detect and store important upcoming events from user messages using LLM."""
-        
-        # Use LLM to detect events and timing
-        event_detection = self._extract_events_with_llm(message)
-        
-        if event_detection and event_detection.get('has_event'):
-            from datetime import date, timedelta
-            import uuid
-            
-            # Calculate event date based on LLM timing analysis
-            event_date = self._parse_event_timing(event_detection.get('timing', ''), message)
-            
-            # Create and store the event
-            event = Event(
-                eventType=event_detection.get('event_type', 'event'),
-                description=message,
-                eventDate=event_date.isoformat() if event_date else None,
-                followUpNeeded=True,
-                followUpDone=False
-            )
-            
-            # Store event directly in Firebase events table
-            from firebase_manager import firebase_manager
-            firebase_manager.add_important_event(email, event)
-            # Event detected and stored successfully
-            
-    def _extract_events_with_llm(self, message: str) -> Optional[dict]:
-        """Use LLM to extract important events and timing from user messages."""
-        system_prompt = """You are an expert at detecting important upcoming events or recent events that someone might want follow-up on. Analyze the user's message and determine:
-
-        1. If there's an important event mentioned (exam, interview, appointment, date, presentation, meeting, deadline, party, etc.)
-        2. The type of event (be specific but use common categories)
-        3. The timing context (when it's happening or happened)
-
-        IMPORTANT: Only detect events that are:
-        - Significant enough that a caring friend would follow up about
-        - Have clear timing indicators (today, tomorrow, next week, yesterday, etc.)
-        - Are specific events, not general activities
-
-        Return your analysis in this EXACT JSON format:
-        {
-            "has_event": true/false,
-            "event_type": "exam" or "interview" or "appointment" or "date" or "presentation" or "meeting" or "deadline" or "party" or "other",
-            "timing": "today" or "tomorrow" or "yesterday" or "next week" or "this weekend" or "next month" or "specific timing phrase",
-            "confidence": 0.0-1.0
-        }
-
-        Only return has_event: true if you're confident (>0.7) there's a real important event with timing."""
-
-        try:
-            messages = [
-                SystemMessage(content=system_prompt),
-                HumanMessage(content=f"Analyze this message for important events: '{message}'")
-            ]
-            
-            response = self.llm.invoke(messages)
-            response_text = response.content.strip()
-            
-            # Parse JSON response
-            import json
-            try:
-                # Extract JSON from response if it's wrapped in text
-                if '{' in response_text and '}' in response_text:
-                    start = response_text.find('{')
-                    end = response_text.rfind('}') + 1
-                    json_str = response_text[start:end]
-                    event_data = json.loads(json_str)
-                    
-                    # Validate the response structure
-                    if isinstance(event_data, dict) and 'has_event' in event_data:
-                        confidence = event_data.get('confidence', 0.0)
-                        if event_data.get('has_event') and confidence >= 0.7:
-                            return event_data
-                        
-            except json.JSONDecodeError:
-                pass
-                
-            return None
-            
-        except Exception as e:
-            return None
-
-    def _parse_event_timing(self, timing: str, original_message: str) -> Optional[date]:
-        """Parse timing information to determine event date."""
-        from datetime import date, timedelta
-        
-        today = date.today()
-        timing_lower = timing.lower()
-        message_lower = original_message.lower()
-        
-        # LLM-provided timing
-        if 'tomorrow' in timing_lower:
-            return today + timedelta(days=1)
-        elif 'today' in timing_lower or 'tonight' in timing_lower:
-            return today
-        elif 'yesterday' in timing_lower:
-            return today - timedelta(days=1)
-        elif 'next week' in timing_lower:
-            return today + timedelta(days=7)
-        elif 'this weekend' in timing_lower:
-            return today + timedelta(days=(5 - today.weekday()) if today.weekday() < 5 else 1)
-        elif 'next month' in timing_lower:
-            return today + timedelta(days=30)
-        
-        # Fallback to original message analysis for specific days
-        days_of_week = {
-            'monday': 0, 'tuesday': 1, 'wednesday': 2, 'thursday': 3,
-            'friday': 4, 'saturday': 5, 'sunday': 6
-        }
-        
-        for day_name, day_num in days_of_week.items():
-            if f'next {day_name}' in message_lower:
-                days_ahead = day_num - today.weekday()
-                if days_ahead <= 0:
-                    days_ahead += 7
-                return today + timedelta(days=days_ahead)
-        
-        return None
-
-    def _generate_proactive_greeting(self, email: str) -> Optional[str]:
-        """Generate a personalized proactive greeting using LLM for important events."""
-        user_profile = firebase_manager.get_user_profile(email)
-        name = user_profile.name or "friend"
-        
-        from datetime import date, timedelta
-        from firebase_manager import firebase_manager
-        today = date.today()
-        yesterday = today - timedelta(days=1)
-        
-        # STEP 1: Check if we need to generate yesterday's summary (first chat of new day)
-        summary_manager.generate_daily_summary_if_needed(email)
-        
-        # STEP 2: Get pending events from Firebase events table
-        pending_events = firebase_manager.get_pending_events(email)
-        
-        for event_data in pending_events:
-            # Convert event_data to proper format for checking
-            #event_date = None
-            event_date_str = event_data.get('eventDate')
-            if isinstance(event_date_str, str) and event_date_str:
-                        from datetime import datetime
-                        event_date = datetime.fromisoformat(event_date_str).date()
-            else:
-                        event_date = None
-            
-            # Determine the timing context
-            timing_context = ""
-            if event_date == today:
-                timing_context = "today"
-            elif event_date == yesterday:
-                timing_context = "yesterday"
-            elif event_date and event_date > today and (event_date - today).days <= 2:
-                days_until = (event_date - today).days
-                timing_context = f"in {days_until} day{'s' if days_until > 1 else ''}"
-            else:
-                continue  # Skip events outside our follow-up window
-            
-            # Create temporary event object for greeting generation
-            event = Event(
-                eventType=event_data['eventType'],
-                description=event_data['description'],
-                eventDate=event_date.isoformat() if event_date else None,
-                mentionedAt=event_data.get('mentionedAt', ''),
-                followUpNeeded=event_data.get('followUpNeeded', True),
-                followUpDone=event_data.get('followUpDone', False)
-            )
-            
-            # Generate personalized greeting using LLM
-            return self._generate_event_greeting_with_llm(event, name, timing_context)
-        
-        return None
-
-    def _generate_event_greeting_with_llm(self, event, name: str, timing_context: str) -> str:
-        """Generate a personalized event greeting using LLM."""
-        system_prompt = f"""You are MyBro, a caring friend who remembers important events in people's lives. Generate a warm, personalized greeting that asks about an important event. 
-
-        GUIDELINES:
-        - Be genuinely caring and show you remember the event
-        - Use natural, friendly language like you're texting a close friend
-        - Show appropriate emotion (excitement, concern, encouragement) for the event type
-        - Keep it conversational and warm, not formal
-        - Reference the timing naturally
-        - Make it feel personal and thoughtful
-
-        EVENT CONTEXT:
-        - Person's name: {name}
-        - Event type: {event.eventType}
-        - Timing: {timing_context}
-        - Event description: {event.description if hasattr(event, 'description') else 'Not available'}
-
-        TIMING MEANINGS:
-        - "today": Event happened today, ask how it went
-        - "yesterday": Event happened yesterday, follow up on how it went
-        - "in X days": Event is upcoming, check how they're feeling about it
-
-        Generate ONE natural, caring greeting message that shows you remember and care about their event."""
-
-        try:
-            messages = [
-                SystemMessage(content=system_prompt),
-                HumanMessage(content=f"Generate a caring greeting for {name} about their {event.eventType} that happened/happens {timing_context}")
-            ]
-            
-            response = self.llm.invoke(messages)
-            greeting = response.content.strip()
-            
-            # Remove any quotes that might wrap the response
-            if greeting.startswith('"') and greeting.endswith('"'):
-                greeting = greeting[1:-1]
-            
-            return greeting
-            
-        except Exception as e:
-            # Simple fallback if LLM fails
-            if timing_context in ["today", "yesterday"]:
-                return f"Hey {name}! How did your {event.eventType} go {timing_context}?"
-            else:
-                return f"Hey {name}! How are you feeling about your upcoming {event.eventType}?"
-
-    def _mark_event_followed_up(self, email: str, event_type: str) -> None:
-        """Mark events as followed up after asking about them."""
-        from firebase_manager import firebase_manager
-        firebase_manager.mark_event_followed_up(email, event_type)
 
     def _generate_follow_up_questions(self, emotion: str, urgency_level: int, user_name: str, email: str, user_message: str = "") -> List[str]:
         """Generate personalized follow-up questions using LLM based on emotion, urgency, and conversation context."""
@@ -781,108 +417,3 @@ Listen to me: You're in crisis right now, and that's okay - it happens to the st
         except Exception as e:
             return []
 
-    def _generate_error_response_with_llm(self, message: str, emotion: str, urgency_level: int, user_name: str) -> str:
-        """Generate contextual error response using LLM."""
-        name = user_name or "friend"
-        
-        system_prompt = f"""You are MyBro, a caring friend who just experienced a technical issue while trying to respond. Generate a warm, apologetic message that:
-
-        1. Acknowledges you're having technical trouble
-        2. Shows you still care and are present for them
-        3. Reassures them this doesn't diminish your support
-        4. Gently encourages them to continue sharing
-        5. Matches the appropriate tone for their emotional state
-
-        CONTEXT:
-        - User's name: {name}
-        - Their emotional state: {emotion}
-        - Urgency level: {urgency_level}/5
-        - What they said: "{message}"
-
-        TONE GUIDELINES:
-        - If urgency is high (4-5): Show extra concern and urgency about staying connected
-        - If urgency is moderate (3): Be caring and reassuring about technical issues
-        - If urgency is low (1-2): Be friendly and casual about the hiccup
-
-        Keep it personal, warm, and focused on maintaining the supportive connection despite technical issues."""
-
-        try:
-            messages = [
-                SystemMessage(content=system_prompt),
-                HumanMessage(content=f"Generate an error response for {name} who is feeling {emotion} (urgency {urgency_level}/5)")
-            ]
-            
-            response = self.llm.invoke(messages)
-            return response.content.strip()
-            
-        except:
-            # Critical fallback for error situations
-            return f"I'm having trouble processing that right now, {name}, but I'm still here for you. Can you tell me more about how you're feeling?"
-
-    def _generate_error_suggestions_with_llm(self, message: str, emotion: str) -> List[str]:
-        """Generate helpful suggestions for when there's a technical error."""
-        system_prompt = f"""Generate 3 helpful suggestions for someone when you've experienced a technical issue. These should:
-
-        1. Help them continue the conversation despite the technical problem
-        2. Be encouraging and supportive
-        3. Suggest alternative ways to express themselves
-        4. Be appropriate for their emotional state: {emotion}
-
-        Return exactly 3 suggestions, one per line, without numbering."""
-
-        try:
-            messages = [
-                SystemMessage(content=system_prompt),
-                HumanMessage(content=f"Generate error recovery suggestions for someone feeling {emotion} who said: '{message}'")
-            ]
-            
-            response = self.llm.invoke(messages)
-            suggestions_text = response.content.strip()
-            
-            suggestions = [s.strip() for s in suggestions_text.split('\n') if s.strip()]
-            return suggestions[:3] if len(suggestions) >= 3 else [
-                "Try rephrasing your message",
-                "Tell me about your day", 
-                "Share what's on your mind right now"
-            ]
-            
-        except:
-            return [
-                "Try rephrasing your message",
-                "Tell me about your day",
-                "Share what's on your mind right now"
-            ]
-
-    def _generate_error_follow_up_questions_with_llm(self, user_name: str) -> List[str]:
-        """Generate follow-up questions for error situations."""
-        name = user_name or "friend"
-        
-        system_prompt = f"""Generate 2 caring follow-up questions for when you've had a technical issue. These should:
-
-        1. Show continued care and interest
-        2. Help restart the conversation smoothly
-        3. Be warm and encouraging
-        4. Use their name naturally: {name}
-
-        Return exactly 2 questions, one per line."""
-
-        try:
-            messages = [
-                SystemMessage(content=system_prompt),
-                HumanMessage(content=f"Generate error recovery questions for {name}")
-            ]
-            
-            response = self.llm.invoke(messages)
-            questions_text = response.content.strip()
-            
-            questions = [q.strip() for q in questions_text.split('\n') if q.strip() and '?' in q]
-            return questions[:2] if len(questions) >= 2 else [
-                "How are you feeling right now?",
-                "What's been on your mind today?"
-            ]
-            
-        except:
-            return [
-                "How are you feeling right now?",
-                "What's been on your mind today?"
-            ]
