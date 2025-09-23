@@ -1,5 +1,6 @@
 from typing import List, Dict, Optional
 from datetime import datetime, timezone, date
+from firebase_admin import firestore
 from data import ConversationMemory, MessagePair, UserProfile, UserMessage, LLMMessage
 from config import config
 from firebase_manager import firebase_manager
@@ -14,6 +15,57 @@ class MessageManager:
     def __init__(self):
         self.conversations: Dict[str, ConversationMemory] = {}
         self.user_profiles: Dict[str, UserProfile] = {}
+        self.db = firebase_manager.db  # Access to Firebase database
+    
+    def add_chat_pair(self, email: str, user_message: str, model_response: str, 
+                      emotion_detected: str = None, urgency_level: int = 1,
+                      suggestions: List[str] = None, follow_up_questions: List[str] = None):
+        """Add a chat pair (user + model response) to Firestore."""
+        if not self.db:
+            return
+        
+        try:
+            now = datetime.now()
+            conversation_id = f"conv_{now.strftime('%Y%m%d')}"
+            
+            chat_pair_data = {
+                "user": user_message,
+                "model": model_response,
+                "timestamp": firestore.SERVER_TIMESTAMP,
+                "emotion_detected": emotion_detected,  # Use snake_case consistently
+                "urgency_level": urgency_level,        # Use snake_case consistently
+                "suggestions": suggestions or [],      # Store suggestions from LLM
+                "follow_up_questions": follow_up_questions or []  # Store follow-up questions
+            }
+            
+            # Add chat pair to user's conversation subcollection
+            self.db.collection('users').document(email).collection('conversations').document(conversation_id).collection('chat').add(chat_pair_data)
+            
+            # Update conversation metadata
+            conv_doc_ref = self.db.collection('users').document(email).collection('conversations').document(conversation_id)
+            conv_doc = conv_doc_ref.get()
+            
+            if conv_doc.exists:
+                existing_metadata = conv_doc.to_dict()
+                pair_count = existing_metadata.get('MessagePairCount', 0) + 1
+                message_count = existing_metadata.get('messageCount', 0) + 2  # Each pair adds 2 messages
+            else:
+                pair_count = 1
+                message_count = 2  # First pair = 2 messages
+            
+            metadata = {
+                "startDate": now.strftime('%Y-%m-%d'),
+                "MessagePairCount": pair_count,
+                "messageCount": message_count,
+                "lastChatAt": firestore.SERVER_TIMESTAMP,
+                "lastMessageAt": firestore.SERVER_TIMESTAMP
+            }
+            
+            conv_doc_ref.set(metadata, merge=True)
+            print(f"SUCCESS: Added chat pair to {email}'s conversation")
+            
+        except Exception as e:
+            print(f"ERROR: Error adding chat pair: {e}")
     
     def create_conversation(self, email: str) -> ConversationMemory:
         """Create a new conversation memory."""
@@ -33,10 +85,56 @@ class MessageManager:
             )
         return self.conversations[conversation_id]
     
-    def get_recent_messages(self, email: str, limit: int = 10) -> List[MessagePair]:
-        """Get recent message pairs for context from Firebase."""
-        chat_pairs = firebase_manager.get_recent_chat(email, limit)
-        return chat_pairs
+    def get_recent_messages(self, email: str, limit: int = 10) -> ConversationMemory:
+        """Get recent chat pairs from Firestore as ConversationMemory object."""
+        today = datetime.now().strftime('%Y%m%d')
+        conversation_id = f"conv_{today}"
+        
+        if not firebase_manager.db:
+            return ConversationMemory(conversation_id=conversation_id)
+        
+        try:
+            chat_ref = firebase_manager.db.collection('users').document(email).collection('conversations').document(conversation_id).collection('chat')
+            chat = chat_ref.order_by('timestamp', direction=firestore.Query.DESCENDING).limit(limit).stream()
+            
+            chat_pair_list = []
+            for doc in chat:
+                pair_data = doc.to_dict()
+                # Create MessagePair object from the data (handle both formats for compatibility)
+                user_message = UserMessage(
+                    content=pair_data.get('user', ''),
+                    emotion_detected=pair_data.get('emotion_detected') or pair_data.get('emotionDetected'),
+                    urgency_level=pair_data.get('urgency_level') or pair_data.get('urgencyLevel', 1)
+                )
+                
+                llm_message = LLMMessage(
+                    content=pair_data.get('model', ''),
+                    suggestions=pair_data.get('suggestions', []),
+                    follow_up_questions=pair_data.get('follow_up_questions', [])
+                )
+                
+                chat_pair = MessagePair(
+                    user_message=user_message,
+                    llm_message=llm_message,
+                    timestamp=pair_data.get('timestamp', datetime.now())
+                )
+                chat_pair_list.append(chat_pair)
+            
+            # Reverse to get chronological order (oldest first)
+            chat_pair_list.reverse()
+            
+            # Return ConversationMemory object
+            return ConversationMemory(
+                conversation_id=conversation_id,
+                chat=chat_pair_list,
+                summary="",  # Will be populated separately if needed
+                key_topics=[]  # Will be populated separately if needed
+            )
+            
+        except Exception as e:
+            print(f"ERROR: Error getting recent chat pairs: {e}")
+        
+        return ConversationMemory(conversation_id=conversation_id)
     
     def get_conversation_by_date(self, email: str, date_str: str) -> Optional[ConversationMemory]:
         """Get conversation data for a specific date, returning ConversationMemory object."""
@@ -156,9 +254,9 @@ class MessageManager:
         if current_conv and current_conv.key_topics:
             context += f"\nPrevious topics: {', '.join(current_conv.key_topics[:5])}"
         
-        if recent_messages:
+        if recent_messages and recent_messages.chat:
             context += "\nRecent conversation with timestamps:\n"
-            for msg_pair in recent_messages[-5:]: 
+            for msg_pair in recent_messages.chat[-5:]: 
                 time_ago = self._format_time_ago(msg_pair.timestamp, now)
                 context += f"User ({time_ago}): {msg_pair.user_message.content[:100]}...\n"
                 context += f"LLM ({time_ago}): {msg_pair.llm_message.content[:100]}...\n"
@@ -205,7 +303,7 @@ class MessageManager:
         recent_messages = self.get_recent_messages(email, limit)
         
         langchain_messages = []
-        for msg_pair in recent_messages:
+        for msg_pair in recent_messages.chat:
             # Add user message
             langchain_messages.append(HumanMessage(content=msg_pair.user_message.content))
             # Add LLM message

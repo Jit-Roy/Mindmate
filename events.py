@@ -8,6 +8,8 @@ from datetime import date, timedelta, datetime
 from typing import Optional, List, Dict, Any
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import SystemMessage, HumanMessage
+from firebase_admin import firestore
+from google.cloud.firestore import FieldFilter
 from data import Event
 from config import config
 from firebase_manager import firebase_manager
@@ -24,6 +26,52 @@ class EventManager:
             google_api_key=config.gemini_api_key,
             temperature=0.3 
         )
+        self.db = firebase_manager.db  # Access to Firebase database
+    
+    def add_important_event(self, email: str, event: Event):
+        """Add an important event to Firestore using subcollection."""
+        if not self.db:
+            return
+        
+        try:
+            event_data = {
+                "eventType": event.eventType,
+                "description": event.description,
+                "eventDate": event.eventDate,
+                "mentionedAt": event.mentionedAt,
+                "followUpNeeded": event.followUpNeeded,
+                "followUpDone": event.followUpDone
+            }
+            
+            # Generate a unique document ID since we no longer have event_id in the model
+            doc_ref = self.db.collection('users').document(email).collection('events').document()
+            doc_ref.set(event_data)
+            print(f"SUCCESS: Added event for {email}: {event.eventType}")
+            
+        except Exception as e:
+            print(f"ERROR: Error adding event: {e}")
+    
+    def get_pending_events(self, email: str) -> List[Dict]:
+        """Get events that need follow-up for user."""
+        if not self.db:
+            return []
+        
+        try:
+            events_ref = self.db.collection('users').document(email).collection('events')
+            events = events_ref.where(filter=FieldFilter('followUpNeeded', '==', True)).where(filter=FieldFilter('followUpDone', '==', False)).stream()
+            
+            pending_events = []
+            for doc in events:
+                event_data = doc.to_dict()
+                event_data['event_id'] = doc.id
+                pending_events.append(event_data)
+            
+            return pending_events
+            
+        except Exception as e:
+            print(f"ERROR: Error getting pending events: {e}")
+        
+        return []
     
     def detect_important_events(self, message: str, email: str) -> None:
         """Detect and store important upcoming events from user messages using LLM."""
@@ -45,7 +93,7 @@ class EventManager:
             )
             
             # Store event directly in Firebase events table
-            firebase_manager.add_important_event(email, event)
+            self.add_important_event(email, event)
 
     def _extract_events_with_llm(self, message: str) -> Optional[dict]:
         """Use LLM to extract important events and timing from user messages."""
@@ -149,7 +197,7 @@ class EventManager:
         summary_manager.generate_conversation_summary(email)
         
         # STEP 2: Get pending events from Firebase events table
-        pending_events = firebase_manager.get_pending_events(email)
+        pending_events = self.get_pending_events(email)
         
         for event_data in pending_events:
             # Convert event_data to proper format for checking
@@ -235,6 +283,20 @@ class EventManager:
 
     def mark_event_followed_up(self, email: str, event_type: str) -> None:
         """Mark events as followed up after asking about them."""
-        firebase_manager.mark_event_followed_up(email, event_type)
+        if not self.db:
+            return
+        
+        try:
+            events_ref = self.db.collection('users').document(email).collection('events')
+            events = events_ref.where(filter=FieldFilter('eventType', '==', event_type)).where(filter=FieldFilter('followUpDone', '==', False)).stream()
+            
+            for doc in events:
+                # Mark this event as followed up
+                doc.reference.update({'followUpDone': True})
+                print(f"SUCCESS: Marked event as followed up: {event_type}")
+                break
+            
+        except Exception as e:
+            print(f"ERROR: Error marking event as followed up: {e}")
 
 event_manager = EventManager()

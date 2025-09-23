@@ -169,7 +169,7 @@ class MentalHealthChatbot:
         # Build conversation for LLM
         conversation_history = self.message_manager.build_conversation_history(email)
         recent_messages = self.message_manager.get_recent_messages(email, 20)
-        conversation_depth = len(recent_messages)
+        conversation_depth = len(recent_messages.chat) if recent_messages and recent_messages.chat else 0
         
         # Create the prompt with context
         enhanced_prompt = f"""{self.system_prompt}
