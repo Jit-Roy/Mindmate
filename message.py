@@ -5,6 +5,7 @@ from config import config
 from firebase_manager import firebase_manager
 from summary import summary_manager
 from datetime import timezone
+from langchain_core.messages import HumanMessage, AIMessage
 
 
 class MessageManager:
@@ -107,5 +108,18 @@ class MessageManager:
         except Exception:
             # If we can't determine, assume it's not the first chat to be safe
             return False
+
+    def build_conversation_history(self, email: str, limit: int = 10) -> List:
+        """Build conversation history for the LLM."""
+        recent_messages = self.get_recent_messages(email, limit)
+        
+        langchain_messages = []
+        for msg_pair in recent_messages:
+            # Add user message
+            langchain_messages.append(HumanMessage(content=msg_pair.user_message.content))
+            # Add LLM message
+            langchain_messages.append(AIMessage(content=msg_pair.llm_message.content))
+        
+        return langchain_messages
 
 message_manager = MessageManager()

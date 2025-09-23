@@ -170,7 +170,7 @@ class MentalHealthChatbot:
             return crisis_response
         
         # Build conversation for LLM
-        conversation_history = self._build_conversation_history(email)
+        conversation_history = self.message_manager.build_conversation_history(email)
         recent_messages = self.message_manager.get_recent_messages(email, 20)
         conversation_depth = len(recent_messages)
         
@@ -272,19 +272,6 @@ class MentalHealthChatbot:
                 suggestions=error_suggestions,
                 follow_up_questions=error_questions
             )
-
-    def _build_conversation_history(self, email: str) -> List:
-        """Build conversation history for the LLM."""
-        recent_messages = self.message_manager.get_recent_messages(email, 10)
-        
-        langchain_messages = []
-        for msg_pair in recent_messages:
-            # Add user message
-            langchain_messages.append(HumanMessage(content=msg_pair.user_message.content))
-            # Add LLM message
-            langchain_messages.append(AIMessage(content=msg_pair.llm_message.content))
-        
-        return langchain_messages
 
     def _generate_follow_up_questions(self, emotion: str, urgency_level: int, user_name: str, email: str, user_message: str = "") -> List[str]:
         """Generate personalized follow-up questions using LLM based on emotion, urgency, and conversation context."""
@@ -416,4 +403,3 @@ class MentalHealthChatbot:
                 
         except Exception as e:
             return []
-

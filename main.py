@@ -57,7 +57,7 @@ def android_chat(user_prompt, user_email="arientific@gmail.com"):
             
             return crisis_response.content
         
-        conversation_history = chatbot._build_conversation_history(user_email)
+        conversation_history = message_manager.build_conversation_history(user_email)
         enhanced_prompt = f"""{chatbot.system_prompt}
 
         CONVERSATION CONTEXT:
