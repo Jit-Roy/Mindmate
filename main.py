@@ -5,6 +5,7 @@ sys.path.append(os.getcwd())
 from chatbot import MentalHealthChatbot
 from memory import MemoryManager
 from firebase_manager import FirebaseManager
+from summary import summary_manager
 import json
 from datetime import datetime
 
@@ -18,11 +19,11 @@ chatbot = MentalHealthChatbot()
 
 def android_chat(user_prompt, user_email="arientific@gmail.com"):
     try:
-        user_profile = memory_manager.get_user_profile(user_email)
+        user_profile = firebase_manager.get_user_profile(user_email)
         user_name = user_profile.name 
-        chatbot._generate_daily_summary_if_needed(user_email)
+        summary_manager.generate_daily_summary_if_needed(user_email)
         proactive_greeting = chatbot._generate_proactive_greeting(user_email)
-        topic_filter = chatbot.health_filter.is_mental_health_related(user_prompt)
+        topic_filter = chatbot.health_filter.filter(user_prompt)
         emotion, urgency_level = chatbot.health_filter.detect_emotion(user_prompt)
         
         if not topic_filter.is_mental_health_related:

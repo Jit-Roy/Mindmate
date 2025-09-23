@@ -6,8 +6,8 @@ from pydantic import BaseModel, Field
 class ImportantEvent(BaseModel):
     """Tracks important upcoming events mentioned in conversation."""
     eventType: str  # 'exam', 'interview', 'appointment'
-    description: str  # What the user said about it
-    eventDate: Optional[str] = None  # When it's happening (stored as string)
+    description: str  
+    eventDate: Optional[str] = None 
     mentionedAt: str = Field(default_factory=lambda: datetime.now().isoformat())  
     followUpNeeded: bool = True
     followUpDone: bool = False
@@ -20,11 +20,11 @@ class UserProfile(BaseModel):
 
 class ChatPair(BaseModel):
     """One chat pair containing both user message and model response."""
-    user: str  # User's message
-    model: str  # Assistant/LLM response
+    user: str  
+    model: str  
     timestamp: datetime = Field(default_factory=datetime.now)
-    emotion_detected: Optional[str] = None  # Emotion detected in user's message
-    urgency_level: Optional[int] = Field(default=1, ge=1, le=5)  # Urgency of user's message
+    emotion_detected: Optional[str] = None  
+    urgency_level: Optional[int] = Field(default=1, ge=1, le=5)  
 
 
 class ConversationMemory(BaseModel):
@@ -51,5 +51,4 @@ class MentalHealthTopicFilter(BaseModel):
     """Filter for mental health related topics."""
     is_mental_health_related: bool
     confidence_score: float = Field(ge=0.0, le=1.0)
-    detected_topics: List[str] = Field(default_factory=list)
     reason: str = ""

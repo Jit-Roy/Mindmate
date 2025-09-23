@@ -8,6 +8,8 @@ from models import ChatResponse, UserProfile, ChatPair, ImportantEvent
 from memory import MemoryManager
 from filter import MentalHealthFilter
 from config import config
+from firebase_manager import firebase_manager
+from summary import summary_manager
 
 
 
@@ -110,14 +112,22 @@ class MentalHealthChatbot:
         proactive_greeting = self._generate_proactive_greeting(email)
         
         # Check if message is mental health related
-        topic_filter = self.health_filter.is_mental_health_related(message)
+        topic_filter = self.health_filter.filter(message)
         
         if not topic_filter.is_mental_health_related:
             redirect_response = "Sorry but i can not answer to that question!!!."
             
-            # Still save the interaction but with a redirect
-            self.memory_manager.add_message(email, "user", message)
-            self.memory_manager.add_message(email, "assistant", redirect_response)
+            # Detect emotion and urgency for the redirect response
+            emotion, urgency_level = self.health_filter.detect_emotion(message)
+            
+            # Save the interaction with redirect using add_chat_pair
+            firebase_manager.add_chat_pair(
+                email=email,
+                user_message=message,
+                model_response=redirect_response,
+                emotion_detected=emotion,
+                urgency_level=urgency_level
+            )
             
             return ChatResponse(
                 message=redirect_response,
@@ -126,7 +136,7 @@ class MentalHealthChatbot:
                 follow_up_questions=["How are you doing emotionally?", "What's been on your mind lately?"]
             )
         
-        # Detect emotion and urgency
+        # Detect emotion and urgency for mental health messages
         emotion, urgency_level = self.health_filter.detect_emotion(message)
         
         # Detect and store important events
@@ -134,21 +144,20 @@ class MentalHealthChatbot:
         
         # Get conversation context BEFORE adding the current message
         context = self.memory_manager.get_conversation_context(email)
-        user_profile = self.memory_manager.get_user_profile(email)
+        user_profile = firebase_manager.get_user_profile(email)
         
         # Check if this is a crisis situation - only trigger for urgency level 5 (extreme)
         if urgency_level >= 5:
             crisis_response = self._handle_crisis_situation(message, user_profile.name)
             
-            # Add user message to memory
-            self.memory_manager.add_message(
-                email, "user", message, 
-                emotion_detected=emotion, 
+            # Save crisis interaction using add_chat_pair
+            firebase_manager.add_chat_pair(
+                email=email,
+                user_message=message,
+                model_response=crisis_response.message,
+                emotion_detected=emotion,
                 urgency_level=urgency_level
             )
-            
-            # Add crisis response to memory
-            self.memory_manager.add_message(email, "assistant", crisis_response.message)
             return crisis_response
         
         # Build conversation for LLM
@@ -215,15 +224,14 @@ class MentalHealthChatbot:
                         self._mark_event_followed_up(email, event_type)
                         break
             
-            # Add user message to memory first
-            self.memory_manager.add_message(
-                email, "user", message, 
-                emotion_detected=emotion, 
+            # Save successful interaction using add_chat_pair
+            firebase_manager.add_chat_pair(
+                email=email,
+                user_message=message,
+                model_response=bot_message,
+                emotion_detected=emotion,
                 urgency_level=urgency_level
             )
-            
-            # Add assistant response to memory
-            self.memory_manager.add_message(email, "assistant", bot_message)
             
             return ChatResponse(
                 message=bot_message,
@@ -238,15 +246,14 @@ class MentalHealthChatbot:
             error_suggestions = self._generate_error_suggestions_with_llm(message, emotion)
             error_questions = self._generate_error_follow_up_questions_with_llm(user_profile.name)
             
-            # Add user message to memory
-            self.memory_manager.add_message(
-                email, "user", message, 
-                emotion_detected=emotion, 
+            # Save error interaction using add_chat_pair
+            firebase_manager.add_chat_pair(
+                email=email,
+                user_message=message,
+                model_response=error_message,
+                emotion_detected=emotion,
                 urgency_level=urgency_level
             )
-            
-            # Add error response to memory
-            self.memory_manager.add_message(email, "assistant", error_message)
             
             return ChatResponse(
                 message=error_message,
@@ -544,7 +551,7 @@ Listen to me: You're in crisis right now, and that's okay - it happens to the st
 
     def _generate_proactive_greeting(self, email: str) -> Optional[str]:
         """Generate a personalized proactive greeting using LLM for important events."""
-        user_profile = self.memory_manager.get_user_profile(email)
+        user_profile = firebase_manager.get_user_profile(email)
         name = user_profile.name or "friend"
         
         from datetime import date, timedelta
@@ -553,7 +560,7 @@ Listen to me: You're in crisis right now, and that's okay - it happens to the st
         yesterday = today - timedelta(days=1)
         
         # STEP 1: Check if we need to generate yesterday's summary (first chat of new day)
-        self._generate_daily_summary_if_needed(email)
+        summary_manager.generate_daily_summary_if_needed(email)
         
         # STEP 2: Get pending events from Firebase events table
         pending_events = firebase_manager.get_pending_events(email)
@@ -883,94 +890,3 @@ Listen to me: You're in crisis right now, and that's okay - it happens to the st
                 "How are you feeling right now?",
                 "What's been on your mind today?"
             ]
-
-    def _generate_daily_summary_if_needed(self, email: str) -> Optional[dict]:
-        """Generate summary for the user's last conversation day if needed."""
-        from firebase_manager import firebase_manager
-        from datetime import date
-        
-        # Find the last day user had a conversation
-        last_conversation_date = firebase_manager.get_last_conversation_date(email)
-        
-        if last_conversation_date:
-            date_str = last_conversation_date.strftime('%Y%m%d')
-            today_str = date.today().strftime('%Y%m%d')
-            
-            # Only generate if it's not today and summary doesn't exist
-            if date_str != today_str and not firebase_manager.daily_summary_exists(email, date_str):
-                conversation_data = firebase_manager.get_conversation_by_date(email, date_str)
-                
-                if conversation_data and len(conversation_data.get('messages', {})) > 0:
-                    # Generate summary for the last conversation day
-                    summary = self._generate_conversation_summary(email, conversation_data, last_conversation_date)
-                    if summary:
-                        firebase_manager.store_daily_summary(email, date_str, summary)
-                        return summary
-        
-        return None
-
-    def _generate_conversation_summary(self, email: str, conversation_data: dict, conversation_date) -> Optional[dict]:
-        """Generate AI summary of a day's conversation using LLM."""
-        
-        # Build conversation text
-        messages = conversation_data.get('messages', {})
-        conversation_text = ""
-        emotions = []
-        urgency_levels = []
-        
-        for msg_data in messages.values():
-            role = msg_data.get('role', 'unknown')
-            content = msg_data.get('content', '')
-            emotion = msg_data.get('emotionDetected')
-            urgency = msg_data.get('urgencyLevel', 1)
-            
-            conversation_text += f"{role}: {content}\n"
-            if emotion:
-                emotions.append(emotion)
-            urgency_levels.append(urgency)
-        
-        if not conversation_text.strip():
-            return None
-        
-        # Generate summary using LLM
-        summary_prompt = f"""Summarize this conversation between a user and their mental health support friend:
-
-CONVERSATION:
-{conversation_text}
-
-Create a friendly summary that covers:
-1. What the user talked about and how they were feeling
-2. Main topics or concerns they shared
-3. Any positive moments or progress they mentioned
-4. Important things to remember for next time you chat
-5. How they seemed to be feeling by the end
-
-Keep it:
-- Simple and conversational (like notes a friend would take)
-- Under 120 words
-- Focused on what matters for continuing the friendship
-- Written like "User talked about..." or "They seemed..."
-- Remember this is for helping continue supportive conversations
-
-Write a natural summary that helps remember what happened in this chat."""
-
-        try:
-            messages = [
-                SystemMessage(content="You are a caring friend creating simple conversation summaries to help remember what you talked about with someone. Write in a natural, friendly tone like you're taking notes to remember for next time."),
-                HumanMessage(content=summary_prompt)
-            ]
-            
-            response = self.llm.invoke(messages)
-            summary_text = response.content.strip()
-            
-            return {
-                "date": conversation_date.strftime('%Y-%m-%d'),
-                "summary_text": summary_text,
-                "emotion_trend": list(set(emotions)) if emotions else [],
-                "avg_urgency": sum(urgency_levels) / len(urgency_levels) if urgency_levels else 1,
-                "message_count": len(messages)
-            }
-            
-        except Exception as e:
-            # Silently handle summary generation errors - not critical for chat functionality
-            return None

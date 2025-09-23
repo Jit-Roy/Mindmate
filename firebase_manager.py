@@ -84,23 +84,6 @@ class FirebaseManager:
     
     # ==================== USER PROFILE OPERATIONS ====================
     
-    def create_user_profile(self, email: str, name: str = None) -> UserProfile:
-        """Create a new user profile using email as document ID in users collection."""
-        profile_data = {
-            "name": name
-        }
-        
-        if self.db:
-            try:
-                self.db.collection('users').document(email).set(profile_data)
-                print(f"SUCCESS: Created user profile for {email}")
-            except Exception as e:
-                print(f"ERROR: Error creating user profile: {e}")
-        
-        return UserProfile(
-            name=name
-        )
-    
     def get_user_profile(self, email: str) -> UserProfile:
         """Get user profile from Firestore using email as document ID."""
         if self.db:
@@ -120,30 +103,6 @@ class FirebaseManager:
         return UserProfile(
             name="Unknown"
         )
-    
-    def update_user_profile(self, email: str, updates: Dict[str, Any]):
-        """Update user profile in Firestore using email as document ID."""
-        # Define allowed profile fields only
-        allowed_fields = {
-            'name'
-        }
-        
-        if self.db:
-            try:
-                # Only allow authorized fields, reject everything else
-                profile_updates = {
-                    k: v for k, v in updates.items() 
-                    if k in allowed_fields
-                }
-                
-                if profile_updates:
-                    self.db.collection('users').document(email).update(profile_updates)
-                    print(f"SUCCESS: Updated user profile for {email} with fields: {list(profile_updates.keys())}")
-                else:
-                    print(f"INFO: No authorized fields to update for {email}")
-                    
-            except Exception as e:
-                print(f"ERROR: Error updating user profile: {e}")
     
     # ==================== CONVERSATION OPERATIONS ====================
     
@@ -194,12 +153,7 @@ class FirebaseManager:
         except Exception as e:
             print(f"ERROR: Error adding chat pair: {e}")
     
-    def add_message(self, email: str, role: str, content: str, 
-                   emotion_detected: str = None, urgency_level: int = 1):
-        """Legacy method - deprecated. Use add_chat_pair instead."""
-        print("WARNING: add_message is deprecated. Use add_chat_pair instead.")
-        # Keep for backward compatibility but don't actually store anything
-        pass
+
     
     def get_recent_chat(self, email: str, limit: int = 10) -> List[ChatPair]:
         """Get recent chat pairs from Firestore."""
@@ -233,11 +187,6 @@ class FirebaseManager:
         except Exception as e:
             print(f"ERROR: Error getting recent chat pairs: {e}")
         
-        return []
-
-    def get_recent_messages(self, email: str, limit: int = 10) -> List[Dict]:
-        """Legacy method - deprecated. Use get_recent_chat instead."""
-        print("WARNING: get_recent_messages is deprecated. Use get_recent_chat instead.")
         return []
     
     # ==================== EVENT OPERATIONS ====================
@@ -304,194 +253,6 @@ class FirebaseManager:
             
         except Exception as e:
             print(f"ERROR: Error marking event as followed up: {e}")
-    
-    # ==================== USER DISCOVERY OPERATIONS ====================
-    
-    def get_all_user_profiles(self) -> Dict[str, UserProfile]:
-        """Get all user profiles from Firestore."""
-        try:
-            users_ref = self.db.collection('users')
-            docs = users_ref.stream()
-            profiles = {}
-            
-            for doc in docs:
-                user_data = doc.to_dict()
-                email = doc.id  # Document ID is the email
-                if user_data:
-                    profile = UserProfile(
-                        name=user_data.get('name')
-                    )
-                    profiles[email] = profile
-            
-            return profiles
-            
-        except Exception as e:
-            print(f"ERROR: Error getting all user profiles: {e}")
-            return {}
-
-    # ==================== DAILY SUMMARY OPERATIONS ====================
-    
-    def get_last_conversation_date(self, email: str) -> Optional[date]:
-        """Get the date of user's last conversation."""
-        if not self.db:
-            return None
-        
-        try:
-            conversations_ref = self.db.collection('users').document(email).collection('conversations')
-            conversations = conversations_ref.stream()
-            
-            conversation_dates = []
-            for doc in conversations:
-                conv_id = doc.id
-                if conv_id.startswith('conv_'):
-                    date_str = conv_id.replace('conv_', '')
-                    try:
-                        conv_date = datetime.strptime(date_str, '%Y%m%d').date()
-                        conversation_dates.append(conv_date)
-                    except ValueError:
-                        continue
-            
-            if conversation_dates:
-                return max(conversation_dates)
-            
-            return None
-            
-        except Exception as e:
-            print(f"ERROR: Error getting last conversation date: {e}")
-            return None
-    
-    def daily_summary_exists(self, email: str, date_str: str) -> bool:
-        """Check if a daily summary already exists for the given date."""
-        if not self.db:
-            return False
-        
-        try:
-            doc_ref = self.db.collection('users').document(email).collection('summaries').document(f'daily_{date_str}')
-            doc = doc_ref.get()
-            return doc.exists
-            
-        except Exception as e:
-            print(f"ERROR: Error checking daily summary existence: {e}")
-            return False
-    
-    def get_conversation_by_date(self, email: str, date_str: str) -> Optional[dict]:
-        """Get conversation data for a specific date, including chat pairs as messages."""
-        if not self.db:
-            return None
-        
-        try:
-            conversation_id = f"conv_{date_str}"
-            doc_ref = self.db.collection('users').document(email).collection('conversations').document(conversation_id)
-            doc = doc_ref.get()
-            
-            if doc.exists:
-                conversation = doc.to_dict()
-                conversation['date'] = date_str
-                
-                # Get chat pairs and convert them to messages format for summarization
-                chat_ref = doc_ref.collection('chat')
-                pairs = list(chat_ref.order_by('timestamp').stream())
-                
-                messages = {}
-                message_counter = 1
-                
-                for pair in pairs:
-                    pair_data = pair.to_dict()
-                    
-                    # Add user message
-                    user_msg_id = f"msg_{message_counter}"
-                    messages[user_msg_id] = {
-                        'role': 'user',
-                        'content': pair_data.get('user', ''),
-                        'timestamp': pair_data.get('timestamp'),
-                        'emotionDetected': pair_data.get('emotion_detected') or pair_data.get('emotionDetected'),
-                        'urgencyLevel': pair_data.get('urgency_level') or pair_data.get('urgencyLevel', 1)
-                    }
-                    message_counter += 1
-                    
-                    # Add assistant message
-                    assistant_msg_id = f"msg_{message_counter}"
-                    messages[assistant_msg_id] = {
-                        'role': 'assistant',
-                        'content': pair_data.get('model', ''),
-                        'timestamp': pair_data.get('timestamp')
-                    }
-                    message_counter += 1
-                
-                conversation['messages'] = messages
-                return conversation
-            
-            return None
-            
-        except Exception as e:
-            print(f"ERROR: Error getting conversation by date: {e}")
-            return None
-    
-    def store_daily_summary(self, email: str, date_str: str, summary: dict):
-        """Store a daily conversation summary."""
-        if not self.db:
-            return
-        
-        try:
-            self.db.collection('users').document(email).collection('summaries').document(f'daily_{date_str}').set(summary)
-            print(f"SUCCESS: Stored daily summary for {email} on {date_str}")
-            
-        except Exception as e:
-            print(f"ERROR: Error storing daily summary: {e}")
-    
-    def get_daily_summary(self, email: str, date_str: str) -> Optional[dict]:
-        """Get daily summary for a specific date."""
-        if not self.db:
-            return None
-        
-        try:
-            doc_ref = self.db.collection('users').document(email).collection('summaries').document(f'daily_{date_str}')
-            doc = doc_ref.get()
-            
-            if doc.exists:
-                return doc.to_dict()
-            return None
-            
-        except Exception as e:
-            print(f"ERROR: Error getting daily summary: {e}")
-            return None
-    
-    def get_all_summaries(self, email: str) -> List[Dict]:
-        """Get all conversation summaries for a user, ordered by date."""
-        if not self.db:
-            return []
-        
-        try:
-            summaries_ref = self.db.collection('users').document(email).collection('summaries')
-            summaries = summaries_ref.order_by('date', direction=firestore.Query.DESCENDING).stream()
-            
-            summary_list = []
-            for doc in summaries:
-                summary_data = doc.to_dict()
-                summary_data['document_id'] = doc.id
-                summary_list.append(summary_data)
-            
-            return summary_list
-            
-        except Exception as e:
-            print(f"ERROR: Error getting all summaries: {e}")
-            return []
-
-    def find_user_by_name(self, name: str) -> Optional[UserProfile]:
-        """Find user profile by name (case insensitive)."""
-        try:
-            all_profiles = self.get_all_user_profiles()
-            name_lower = name.lower()
-            
-            for profile in all_profiles.values():
-                if profile.name and profile.name.lower() == name_lower:
-                    return profile
-            
-            return None
-            
-        except Exception as e:
-            print(f"ERROR: Error finding user by name: {e}")
-            return None
 
 # Global Firebase manager instance
 firebase_manager = FirebaseManager()
