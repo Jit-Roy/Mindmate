@@ -1,6 +1,6 @@
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage
-from models import MentalHealthTopicFilter
+from data import MentalHealthTopicFilter
 from config import config
 
 

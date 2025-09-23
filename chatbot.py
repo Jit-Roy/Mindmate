@@ -4,7 +4,7 @@ from datetime import datetime, date
 from typing import List, Optional
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
-from models import ChatResponse, UserProfile, ChatPair, ImportantEvent
+from data import ChatResponse, MessagePair, Event
 from message import MemoryManager
 from filter import MentalHealthFilter
 from config import config
@@ -443,7 +443,7 @@ Listen to me: You're in crisis right now, and that's okay - it happens to the st
             event_date = self._parse_event_timing(event_detection.get('timing', ''), message)
             
             # Create and store the event
-            event = ImportantEvent(
+            event = Event(
                 eventType=event_detection.get('event_type', 'event'),
                 description=message,
                 eventDate=event_date.isoformat() if event_date else None,
@@ -588,7 +588,7 @@ Listen to me: You're in crisis right now, and that's okay - it happens to the st
                 continue  # Skip events outside our follow-up window
             
             # Create temporary event object for greeting generation
-            event = ImportantEvent(
+            event = Event(
                 eventType=event_data['eventType'],
                 description=event_data['description'],
                 eventDate=event_date.isoformat() if event_date else None,

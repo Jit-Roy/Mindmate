@@ -11,7 +11,7 @@ from typing import List, Dict, Any, Optional
 import firebase_admin
 from firebase_admin import credentials, firestore
 from google.cloud.firestore import FieldFilter
-from models import UserProfile, ChatPair, ImportantEvent
+from data import UserProfile, MessagePair, Event
 
 # Load environment variables
 from dotenv import load_dotenv
@@ -133,7 +133,7 @@ class FirebaseManager:
             
             if conv_doc.exists:
                 existing_metadata = conv_doc.to_dict()
-                pair_count = existing_metadata.get('chatPairCount', 0) + 1
+                pair_count = existing_metadata.get('MessagePairCount', 0) + 1
                 message_count = existing_metadata.get('messageCount', 0) + 2  # Each pair adds 2 messages
             else:
                 pair_count = 1
@@ -141,7 +141,7 @@ class FirebaseManager:
             
             metadata = {
                 "startDate": now.strftime('%Y-%m-%d'),
-                "chatPairCount": pair_count,
+                "MessagePairCount": pair_count,
                 "messageCount": message_count,
                 "lastChatAt": firestore.SERVER_TIMESTAMP,
                 "lastMessageAt": firestore.SERVER_TIMESTAMP
@@ -155,7 +155,7 @@ class FirebaseManager:
     
 
     
-    def get_recent_chat(self, email: str, limit: int = 10) -> List[ChatPair]:
+    def get_recent_chat(self, email: str, limit: int = 10) -> List[MessagePair]:
         """Get recent chat pairs from Firestore."""
         if not self.db:
             return []
@@ -170,8 +170,8 @@ class FirebaseManager:
             chat_pair_list = []
             for doc in chat:
                 pair_data = doc.to_dict()
-                # Create ChatPair object from the data (handle both formats for compatibility)
-                chat_pair = ChatPair(
+                # Create MessagePair object from the data (handle both formats for compatibility)
+                chat_pair = MessagePair(
                     user=pair_data.get('user', ''),
                     model=pair_data.get('model', ''),
                     timestamp=pair_data.get('timestamp', datetime.now()),
@@ -191,7 +191,7 @@ class FirebaseManager:
     
     # ==================== EVENT OPERATIONS ====================
     
-    def add_important_event(self, email: str, event: ImportantEvent):
+    def add_important_event(self, email: str, event: Event):
         """Add an important event to Firestore using subcollection."""
         if not self.db:
             return

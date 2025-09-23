@@ -1,24 +1,27 @@
 import json
 import asyncio
 from typing import List, Dict, Any, Optional
-from datetime import datetime, timezone
+from datetime import datetime, timedelta
 from data import ConversationMemory, MessagePair, UserProfile
 from config import config
 from firebase_manager import firebase_manager
 from summary import summary_manager
 
 
-class Message:
-    """Message class for backward compatibility."""
-    def __init__(self, role: str, content: str, timestamp: datetime = None, emotion_detected: str = None, urgency_level: int = 1):
-
+class SimpleMessage:
+    """Simple message class for backward compatibility."""
+    def __init__(self, role: str, content: str, timestamp: datetime = None, 
+                 emotion_detected: str = None, urgency_level: int = 1):
         self.role = role
         self.content = content
         
         # Ensure timestamp is timezone-aware
         if timestamp is None:
+            from datetime import timezone
             self.timestamp = datetime.now(timezone.utc)
         elif hasattr(timestamp, 'tzinfo') and timestamp.tzinfo is None:
+            # Make timezone-naive timestamp timezone-aware (UTC)
+            from datetime import timezone
             self.timestamp = timestamp.replace(tzinfo=timezone.utc)
         else:
             self.timestamp = timestamp
@@ -56,12 +59,12 @@ class MemoryManager:
             )
         return self.conversations[conversation_id]
     
-    def get_recent_messages(self, email: str, limit: int = 10) -> List[Message]:
+    def get_recent_messages(self, email: str, limit: int = 10) -> List[SimpleMessage]:
         """Get recent messages for context from Firebase using chat pairs."""
         # Get recent chat pairs from Firebase
         chat_pairs = firebase_manager.get_recent_chat(email, limit // 2)  # Each pair has 2 messages
         
-        # Convert chat pairs to Message objects for backward compatibility
+        # Convert chat pairs to SimpleMessage objects for backward compatibility
         messages = []
         for chat_pair in chat_pairs:
             try:
@@ -77,7 +80,7 @@ class MemoryManager:
                     timestamp = datetime.now(timezone.utc)
                 
                 # Add user message
-                user_msg = Message(
+                user_msg = SimpleMessage(
                     role="user",
                     content=chat_pair.user,
                     timestamp=timestamp,
@@ -87,7 +90,7 @@ class MemoryManager:
                 messages.append(user_msg)
                 
                 # Add model response
-                model_msg = Message(
+                model_msg = SimpleMessage(
                     role="assistant",
                     content=chat_pair.model,
                     timestamp=timestamp
