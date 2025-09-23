@@ -12,6 +12,7 @@ from firebase_manager import firebase_manager
 from summary import summary_manager
 from events import event_manager
 from crisis import crisis_manager
+from helper import helper_manager
 
 
 
@@ -221,9 +222,10 @@ class MentalHealthChatbot:
             response = await self.llm.ainvoke(messages)
             bot_message = response.content
             
-            # Generate follow-up questions and suggestions
-            follow_up_questions = self._generate_follow_up_questions(emotion, urgency_level, user_profile.name, email, message)
-            suggestions = self._generate_suggestions(emotion, urgency_level, message, user_profile.name)
+            # Generate follow-up questions and suggestions in single API call
+            follow_up_questions, suggestions = helper_manager.generate_questions_and_suggestions(
+                emotion, urgency_level, user_profile.name, email, message
+            )
             
             # If we used a proactive greeting, mark relevant events as followed up
             if proactive_greeting:
@@ -272,134 +274,3 @@ class MentalHealthChatbot:
                 suggestions=error_suggestions,
                 follow_up_questions=error_questions
             )
-
-    def _generate_follow_up_questions(self, emotion: str, urgency_level: int, user_name: str, email: str, user_message: str = "") -> List[str]:
-        """Generate personalized follow-up questions using LLM based on emotion, urgency, and conversation context."""
-        name = user_name or "friend"
-        
-        # Get conversation context
-        recent_messages = self.message_manager.get_recent_messages(email, 10)
-        conversation_depth = len(recent_messages)
-        
-        # Build conversation history for context
-        conversation_context = ""
-        if recent_messages:
-            for msg_pair in recent_messages[-5:]:  # Last 5 messages for context
-                conversation_context += f"User: {msg_pair.user_message.content}\n"
-                conversation_context += f"Assistant: {msg_pair.llm_message.content}\n"
-        
-        system_prompt = f"""You are a caring mental health companion generating thoughtful follow-up questions. Based on the user's current emotional state, conversation history, and relationship depth, create 2-3 empathetic follow-up questions that:
-
-        1. Show genuine care and interest in their situation
-        2. Are appropriate for their emotional state and urgency level
-        3. Consider the conversation depth and intimacy level
-        4. Help them explore their feelings or situation deeper
-        5. Feel natural and conversational, not clinical
-
-        CONTEXT:
-        - User's name: {name}
-        - Current emotion: {emotion}
-        - Urgency level: {urgency_level}/5 (1=casual, 2=mild concern, 3=moderate distress, 4=high distress, 5=crisis)
-        - Conversation depth: {conversation_depth} messages exchanged
-
-        CONVERSATION GUIDELINES BY URGENCY:
-        - Level 1-2: Casual, supportive questions that show interest
-        - Level 3: More caring questions about their well-being and situation
-        - Level 4-5: Questions focused on safety, support systems, and immediate needs
-
-        CONVERSATION DEPTH GUIDELINES:
-        - Early conversation (1-3 messages): General, rapport-building questions
-        - Developing relationship (4-10 messages): More personal but still gentle questions  
-        - Deeper relationship (10+ messages): Can ask about family, relationships, self-care naturally
-
-        QUESTION STYLE:
-        - Use {name} naturally in questions when appropriate
-        - Be conversational, not interrogating
-        - Mix emotional support with practical exploration
-        - Show you remember and care about their situation
-
-        Recent conversation context:
-        {conversation_context}
-
-        Return 1/2/3 thoughtful follow-up questions in a paragraph without numbering or bullet points."""
-
-        try:
-            messages = [
-                SystemMessage(content=system_prompt),
-                HumanMessage(content=f"Current user message: '{user_message}' | Generate empathetic follow-up questions for someone feeling {emotion} at urgency level {urgency_level}/5.")
-            ]
-            
-            response = self.llm.invoke(messages)
-            questions_text = response.content.strip()
-            
-            # Split into individual questions and clean them
-            questions = [
-                question.strip() 
-                for question in questions_text.split('\n') 
-                if question.strip() and '?' in question
-            ]
-            
-            # Ensure we have 2-3 questions
-            if len(questions) >= 2:
-                return questions[:3]  # Return max 3 questions
-            else:
-                # Return empty list if LLM response is inadequate
-                return []
-                
-        except Exception as e:
-            pass
-
-    def _generate_suggestions(self, emotion: str, urgency_level: int, user_message: str = "", user_name: str = "friend") -> List[str]:
-        """Generate helpful suggestions using LLM based on detected emotion, urgency, and context."""
-        
-        system_prompt = f"""You are a mental health support assistant generating personalized coping suggestions. Based on the user's emotional state and situation, provide 3 practical, actionable suggestions that are:
-
-        1. Immediately helpful for their current emotional state
-        2. Appropriate for their urgency level (1-5 scale)
-        3. Realistic and achievable in the next few hours
-        4. Supportive without being overwhelming
-
-        CONTEXT:
-        - User's emotion: {emotion}
-        - Urgency level: {urgency_level}/5 (1=casual, 2=mild concern, 3=moderate distress, 4=high distress, 5=crisis)
-        - User's name: {user_name}
-
-        URGENCY GUIDELINES:
-        - Level 1-2: Gentle self-care and wellness suggestions
-        - Level 3: More focused coping strategies and support-seeking
-        - Level 4-5: Immediate safety measures and professional help
-
-        SUGGESTION RULES:
-        - Each suggestion should be 1-2 sentences max
-        - Be specific and actionable ("Call your best friend" not "reach out to someone")
-        - Match the urgency level appropriately
-        - Consider their emotional state (anxious needs different help than depressed)
-        - Avoid generic advice - make it feel personal
-
-        Return EXACTLY 3 suggestions, one per line, without numbering or bullet points."""
-
-        try:
-            messages = [
-                SystemMessage(content=system_prompt),
-                HumanMessage(content=f"User's emotional state: {emotion} (urgency {urgency_level}/5). Generate 3 personalized suggestions for immediate support. User message context: '{user_message}'")
-            ]
-            
-            response = self.llm.invoke(messages)
-            suggestions_text = response.content.strip()
-            
-            # Split into individual suggestions and clean them
-            suggestions = [
-                suggestion.strip() 
-                for suggestion in suggestions_text.split('\n') 
-                if suggestion.strip()
-            ]
-            
-            # Ensure we have exactly 3 suggestions
-            if len(suggestions) >= 3:
-                return suggestions[:3]
-            else:
-                # Return empty list if LLM response is inadequate
-                return []
-                
-        except Exception as e:
-            return []

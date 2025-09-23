@@ -8,6 +8,7 @@ from firebase_manager import FirebaseManager
 from summary import summary_manager
 from events import event_manager
 from crisis import crisis_manager
+from helper import helper_manager
 import json
 from datetime import datetime
 
@@ -98,8 +99,9 @@ def android_chat(user_prompt, user_email="arientific@gmail.com"):
         response = chatbot.llm.invoke(messages)
         bot_message = response.content
         try:
-            follow_up_questions = chatbot._generate_follow_up_questions(emotion, urgency_level, user_name, user_email, user_prompt)
-            suggestions = chatbot._generate_suggestions(emotion, urgency_level, user_prompt, user_name)
+            follow_up_questions, suggestions = helper_manager.generate_questions_and_suggestions(
+                emotion, urgency_level, user_name, user_email, user_prompt
+            )
         except:
             follow_up_questions = []
             suggestions = []
