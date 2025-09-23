@@ -5,15 +5,11 @@ No sessions, no analytics, no separate tables - just users organized by email
 """
 
 import os
-import secrets
-from datetime import datetime, date
-from typing import List, Dict, Any, Optional
 import firebase_admin
 from firebase_admin import credentials, firestore
 from google.cloud.firestore import FieldFilter
-from data import UserProfile, MessagePair, Event, UserMessage, LLMMessage, ConversationMemory
+from data import UserProfile
 
-# Load environment variables
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -82,8 +78,6 @@ class FirebaseManager:
             print(f"Service account file failed: {e}")
             return False
     
-    # ==================== USER PROFILE OPERATIONS ====================
-    
     def get_user_profile(self, email: str) -> UserProfile:
         """Get user profile from Firestore using email as document ID."""
         if self.db:
@@ -95,7 +89,11 @@ class FirebaseManager:
                 if doc.exists:
                     user_data = doc.to_dict()
                     return UserProfile(
-                        name=user_data.get('name')
+                        name=user_data.get('name'),
+                        username=user_data.get('username'),
+                        age=user_data.get('age'),
+                        gender=user_data.get('gender'),
+                        avatar=user_data.get('avatar')
                     )
             except Exception as e:
                 print(f"ERROR: Error getting user profile: {e}")
@@ -104,5 +102,4 @@ class FirebaseManager:
             name="Unknown"
         )
 
-# Global Firebase manager instance
 firebase_manager = FirebaseManager()

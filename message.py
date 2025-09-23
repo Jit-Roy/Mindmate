@@ -15,11 +15,9 @@ class MessageManager:
     def __init__(self):
         self.conversations: Dict[str, ConversationMemory] = {}
         self.user_profiles: Dict[str, UserProfile] = {}
-        self.db = firebase_manager.db  # Access to Firebase database
+        self.db = firebase_manager.db
     
-    def add_chat_pair(self, email: str, user_message: str, model_response: str, 
-                      emotion_detected: str = None, urgency_level: int = 1,
-                      suggestions: List[str] = None, follow_up_questions: List[str] = None):
+    def add_chat_pair(self, email: str, user_message: str, model_response: str, emotion_detected: str = None, urgency_level: int = 1, suggestions: List[str] = None, follow_up_questions: List[str] = None):
         """Add a chat pair (user + model response) to Firestore."""
         if not self.db:
             return
@@ -32,10 +30,10 @@ class MessageManager:
                 "user": user_message,
                 "model": model_response,
                 "timestamp": firestore.SERVER_TIMESTAMP,
-                "emotion_detected": emotion_detected,  # Use snake_case consistently
-                "urgency_level": urgency_level,        # Use snake_case consistently
-                "suggestions": suggestions or [],      # Store suggestions from LLM
-                "follow_up_questions": follow_up_questions or []  # Store follow-up questions
+                "emotion_detected": emotion_detected,  
+                "urgency_level": urgency_level,      
+                "suggestions": suggestions or [],     
+                "follow_up_questions": follow_up_questions or [] 
             }
             
             # Add chat pair to user's conversation subcollection
