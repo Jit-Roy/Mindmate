@@ -22,6 +22,69 @@ class HelperManager:
             max_tokens=config.max_tokens
         )
 
+    def detect_emotion(self, message: str) -> Tuple[str, int]:
+        """
+        Detect emotion and urgency level from user message.
+        
+        Args:
+            message: User's message to analyze
+            
+        Returns:
+            Tuple of (emotion, urgency_level) where urgency_level is 1-5
+        """
+        system_prompt = """You are an expert emotion detection system for a mental health chatbot. Analyze the user's message and determine:
+
+        1. PRIMARY EMOTION: The main emotion expressed (happy, sad, anxious, angry, excited, frustrated, depressed, hopeful, etc.)
+        2. URGENCY LEVEL: Rate from 1-5 based on how urgent the situation seems:
+
+        URGENCY LEVELS:
+        1 = Casual/Positive: Good news, casual chat, mild stress, normal life updates
+        2 = Mild Concern: Minor worries, everyday stress, slight sadness, general life issues
+        3 = Moderate Distress: Significant stress, relationship problems, work/school issues, moderate anxiety/depression
+        4 = High Distress: Severe anxiety, major life crisis, intense emotional pain, thoughts of self-harm (non-suicidal)
+        5 = CRISIS: Suicidal thoughts, immediate danger, severe depression with self-harm ideation, emergency situation
+
+        IMPORTANT GUIDELINES:
+        - Most messages should be level 1-3. Only use 4-5 for genuinely serious situations
+        - Don't over-dramatize normal stress or sadness
+        - Look for keywords like "kill myself", "end it all", "can't go on" for level 5
+        - Consider context: "I'm so tired" could be level 1 (normal) or level 3 (depression symptom)
+
+        Respond EXACTLY in this format:
+        EMOTION: [single word emotion]
+        URGENCY: [number 1-5]
+        REASONING: [brief explanation of why you chose this urgency level]"""
+
+        try:
+            messages = [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=f"Analyze this message for emotion and urgency: '{message}'")
+            ]
+            
+            response = self.llm.invoke(messages)
+            response_text = response.content.strip()
+            
+            # Parse the response
+            emotion = "neutral"
+            urgency_level = 1
+            
+            lines = response_text.split('\n')
+            for line in lines:
+                if line.startswith("EMOTION:"):
+                    emotion = line.split(":", 1)[1].strip().lower()
+                elif line.startswith("URGENCY:"):
+                    try:
+                        urgency_level = int(line.split(":", 1)[1].strip())
+                        urgency_level = max(1, min(5, urgency_level))  # Ensure 1-5 range
+                    except (ValueError, IndexError):
+                        urgency_level = 1
+            
+            return emotion, urgency_level
+            
+        except Exception as e:
+            # Fallback: return neutral emotion and low urgency if LLM fails
+            return "neutral", 1
+
     def generate_questions_and_suggestions(self, emotion: str, urgency_level: int, user_name: str, email: str, user_message: str = "") -> Tuple[List[str], List[str]]:
         """
         Generate both follow-up questions and suggestions in a single API call.

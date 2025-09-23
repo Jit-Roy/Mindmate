@@ -24,7 +24,7 @@ def android_chat(user_prompt, user_email="arientific@gmail.com"):
         summary_manager.generate_daily_summary_if_needed(user_email)
         proactive_greeting = event_manager.generate_proactive_greeting(user_email)
         topic_filter = chatbot.health_filter.filter(user_prompt)
-        emotion, urgency_level = chatbot.health_filter.detect_emotion(user_prompt)
+        emotion, urgency_level = helper_manager.detect_emotion(user_prompt)
         
         if not topic_filter.is_mental_health_related:
             redirect_response = "Sorry but i can not answer to that question!!!."
@@ -128,7 +128,7 @@ def android_chat(user_prompt, user_email="arientific@gmail.com"):
             # Use crisis manager for error handling
             user_profile = firebase_manager.get_user_profile(user_email)
             user_name = user_profile.name
-            emotion, urgency_level = chatbot.health_filter.detect_emotion(user_prompt)
+            emotion, urgency_level = helper_manager.detect_emotion(user_prompt)
             return crisis_manager.handle_error_response(user_prompt, emotion, urgency_level, user_name).content
         except:
             return f"Sorry, I'm having technical difficulties. Please try again later. Error: {e}"

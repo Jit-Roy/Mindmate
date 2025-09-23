@@ -30,11 +30,7 @@ class MentalHealthChatbot:
         self.message_manager = MessageManager()
         self.health_filter = MentalHealthFilter()
         
-        self.system_prompt = self._create_system_prompt()
-    
-    def _create_system_prompt(self) -> str:
-        """Create the system prompt that defines the chatbot's personality."""
-        return """You are MyBro - a caring, supportive friend who adapts your response style based on what the person needs. Your personality adjusts to match the situation:
+        self.system_prompt = """You are MyBro - a caring, supportive friend who adapts your response style based on what the person needs. Your personality adjusts to match the situation:
 
         ⏰ TIME AWARENESS - VERY IMPORTANT:
         - ALWAYS acknowledge when time has passed since your last conversation
@@ -121,7 +117,7 @@ class MentalHealthChatbot:
             redirect_response = "Sorry but i can not answer to that question!!!."
             
             # Detect emotion and urgency for the redirect response
-            emotion, urgency_level = self.health_filter.detect_emotion(message)
+            emotion, urgency_level = helper_manager.detect_emotion(message)
             
             # Define redirect suggestions and questions
             redirect_suggestions = ["Tell me how you're feeling today", "Share what's on your mind"]
@@ -145,7 +141,7 @@ class MentalHealthChatbot:
             )
         
         # Detect emotion and urgency for mental health messages
-        emotion, urgency_level = self.health_filter.detect_emotion(message)
+        emotion, urgency_level = helper_manager.detect_emotion(message)
         
         # Detect and store important events
         event_manager.detect_important_events(message, email)

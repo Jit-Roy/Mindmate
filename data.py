@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 
 class Event(BaseModel):
     """Tracks important upcoming events mentioned in conversation."""
+    eventid: str
     eventType: str  # 'exam', 'interview', 'appointment'
     description: str  
     eventDate: Optional[str] = None 
