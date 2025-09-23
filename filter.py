@@ -1,8 +1,6 @@
-import random
-from typing import List
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage
-from models import MentalHealthTopicFilter, ChatResponse
+from models import MentalHealthTopicFilter
 from config import config
 
 
@@ -13,7 +11,7 @@ class MentalHealthFilter:
         self.llm = ChatGoogleGenerativeAI(
             model=config.model_name,
             google_api_key=config.gemini_api_key,
-            temperature=0.3  # Lower temperature for more consistent filtering
+            temperature=0.3 
         )
     
     def filter(self, message: str) -> MentalHealthTopicFilter:
@@ -63,7 +61,6 @@ class MentalHealthFilter:
             elif line.startswith("REASON:"):
                 reason = line.split(":", 1)[1].strip()
         
-        # Raise error if any required field is missing
         if is_mental_health is None:
             raise ValueError("MENTAL_HEALTH field not found in LLM response")
         if confidence is None:

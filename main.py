@@ -3,7 +3,7 @@ import os
 sys.path.append(os.getcwd())
 
 from chatbot import MentalHealthChatbot
-from memory import MemoryManager
+from message import MemoryManager
 from firebase_manager import FirebaseManager
 from summary import summary_manager
 import json

@@ -5,7 +5,7 @@ from typing import List, Optional
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from models import ChatResponse, UserProfile, ChatPair, ImportantEvent
-from memory import MemoryManager
+from message import MemoryManager
 from filter import MentalHealthFilter
 from config import config
 from firebase_manager import firebase_manager
