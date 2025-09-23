@@ -147,7 +147,7 @@ class MentalHealthChatbot:
         event_manager.detect_important_events(message, email)
         
         # Get conversation context BEFORE adding the current message
-        context = self.message_manager.get_conversation_context(email)
+        recent_messages = self.message_manager.get_recent_messages(email, 20)
         user_profile = firebase_manager.get_user_profile(email)
         
         # Check if this is a crisis situation - only trigger for urgency level 5 (extreme)
@@ -166,16 +166,17 @@ class MentalHealthChatbot:
             )
             return crisis_response
         
-        # Build conversation for LLM
-        conversation_history = self.message_manager.build_conversation_history(email)
+        # Build conversation for LLM - work directly with ConversationMemory
         recent_messages = self.message_manager.get_recent_messages(email, 20)
-        conversation_depth = len(recent_messages.chat) if recent_messages and recent_messages.chat else 0
         
-        # Create the prompt with context
+        # Create the prompt with user profile and recent conversation info
         enhanced_prompt = f"""{self.system_prompt}
 
-        CONVERSATION CONTEXT:
-        {context}
+        USER PROFILE:
+        - Name: {user_profile.name or 'friend'}
+        - Username: {user_profile.username or 'Not set'}
+        - Age: {user_profile.age or 'Not specified'}
+        - Gender: {user_profile.gender or 'Not specified'}
 
         {f"PROACTIVE GREETING: You should start your response with this caring follow-up: '{proactive_greeting}'" if proactive_greeting else ""}
 
@@ -183,7 +184,6 @@ class MentalHealthChatbot:
         - Detected emotion: {emotion}
         - Urgency level: {urgency_level}/5
         - User prefers to be called: {user_profile.name}
-        - Conversation depth: {conversation_depth} messages (deeper conversations allow more personal questions)
 
         🎯 RESPONSE GUIDANCE BASED ON URGENCY LEVEL:
 
@@ -206,12 +206,16 @@ class MentalHealthChatbot:
         5. Acknowledge time passed since last conversation if applicable
         6. If there's a proactive greeting above, start with that and then naturally flow into responding to their current message"""
         
-        # Build message list for the LLM
-        messages = [
-            SystemMessage(content=enhanced_prompt),
-            *conversation_history,
-            HumanMessage(content=message)
-        ]
+        # Build message list for the LLM directly from ConversationMemory
+        messages = [SystemMessage(content=enhanced_prompt)]
+        
+        # Add conversation history from recent messages
+        for msg_pair in recent_messages.chat:
+            messages.append(HumanMessage(content=msg_pair.user_message.content))
+            messages.append(AIMessage(content=msg_pair.llm_message.content))
+        
+        # Add current user message
+        messages.append(HumanMessage(content=message))
         
         try:
             # Get response from LLM

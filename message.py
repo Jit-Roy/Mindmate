@@ -125,8 +125,8 @@ class MessageManager:
             return ConversationMemory(
                 conversation_id=conversation_id,
                 chat=chat_pair_list,
-                summary="",  # Will be populated separately if needed
-                key_topics=[]  # Will be populated separately if needed
+                summary="", 
+                key_topics=[]  
             )
             
         except Exception as e:
@@ -228,85 +228,19 @@ class MessageManager:
             print(f"ERROR: Error getting last conversation date: {e}")
             return None
     
-    def get_conversation_context(self, email: str) -> str:
-        """Get formatted conversation context for the LLM including temporal awareness."""
-        profile = firebase_manager.get_user_profile(email)
-        recent_messages = self.get_recent_messages(email, 5)
-        current_conv = self.get_current_conversation(email) 
-        now = datetime.now(timezone.utc)
-        
-        # Start with user profile and current context
-        context = f"User Profile: {profile.name or 'friend'}"
-        
-        # Add current date/time context for the AI
-        context += f"\n📅 Current date/time: {now.strftime('%A, %B %d, %Y at %I:%M %p')}"
-        
-        # Check if this is the first chat of the day and include summary
-        if self._is_first_chat_of_day(email):
-            last_summary = summary_manager.generate_conversation_summary(email)
-            if last_summary:
-                summary_date = last_summary.get('date', 'unknown')
-                summary_text = last_summary.get('summary_text', '')
-                context += f"\n📋 Last conversation summary ({summary_date}): {summary_text}"
-        
-        if current_conv and current_conv.key_topics:
-            context += f"\nPrevious topics: {', '.join(current_conv.key_topics[:5])}"
-        
-        if recent_messages and recent_messages.chat:
-            context += "\nRecent conversation with timestamps:\n"
-            for msg_pair in recent_messages.chat[-5:]: 
-                time_ago = self._format_time_ago(msg_pair.timestamp, now)
-                context += f"User ({time_ago}): {msg_pair.user_message.content[:100]}...\n"
-                context += f"LLM ({time_ago}): {msg_pair.llm_message.content[:100]}...\n"
-        
-        return context
-    
-    def _format_time_ago(self, timestamp: datetime, current_time: datetime) -> str:
-        """Format how long ago a message was sent."""
-        time_diff = current_time - timestamp
-        
-        if time_diff.days > 0:
-            if time_diff.days == 1:
-                return "yesterday"
-            else:
-                return f"{time_diff.days} days ago"
-        elif time_diff.seconds > 3600:
-            hours = time_diff.seconds // 3600
-            return f"{hours}h ago"
-        elif time_diff.seconds > 60:
-            minutes = time_diff.seconds // 60
-            return f"{minutes}m ago"
-        else:
-            return "just now"
-
     def _is_first_chat_of_day(self, email: str) -> bool:
-        """Check if this is the first chat of the current day."""
+        """
+        Returns True if this is the user's first chat of the day, False otherwise.
+        """
         try:
-            today_str = datetime.now().strftime('%Y%m%d')
-            today_conv = self.get_conversation_by_date(email, today_str)
-            
-            # If no conversation exists for today, this is the first chat
-            if not today_conv or not today_conv.chat:
-                return True
-                
-            # If messages exist, this is not the first chat
+            today_str = datetime.now().strftime('Y%m%d')
+            conversation_id = f"conv_{today_str}"
+            doc_ref = self.db.collection('users').document(email).collection('conversations').document(conversation_id)
+            doc = doc_ref.get()
+            # If the conversation document does not exist, it's the first chat of the day
+            return not doc.exists
+        except Exception as e:
+            print(f"ERROR: Error checking first chat of day: {e}")
             return False
-            
-        except Exception:
-            # If we can't determine, assume it's not the first chat to be safe
-            return False
-
-    def build_conversation_history(self, email: str, limit: int = 10) -> List:
-        """Build conversation history for the LLM."""
-        recent_messages = self.get_recent_messages(email, limit)
-        
-        langchain_messages = []
-        for msg_pair in recent_messages.chat:
-            # Add user message
-            langchain_messages.append(HumanMessage(content=msg_pair.user_message.content))
-            # Add LLM message
-            langchain_messages.append(AIMessage(content=msg_pair.llm_message.content))
-        
-        return langchain_messages
 
 message_manager = MessageManager()
