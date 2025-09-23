@@ -46,10 +46,10 @@ class MessageManager:
             if conv_doc.exists:
                 existing_metadata = conv_doc.to_dict()
                 pair_count = existing_metadata.get('MessagePairCount', 0) + 1
-                message_count = existing_metadata.get('messageCount', 0) + 2  # Each pair adds 2 messages
+                message_count = existing_metadata.get('messageCount', 0) + 2  
             else:
                 pair_count = 1
-                message_count = 2  # First pair = 2 messages
+                message_count = 2 
             
             metadata = {
                 "startDate": now.strftime('%Y-%m-%d'),
@@ -60,36 +60,17 @@ class MessageManager:
             }
             
             conv_doc_ref.set(metadata, merge=True)
-            print(f"SUCCESS: Added chat pair to {email}'s conversation")
             
         except Exception as e:
             print(f"ERROR: Error adding chat pair: {e}")
     
-    def create_conversation(self, email: str) -> ConversationMemory:
-        """Create a new conversation memory."""
-        conversation_id = f"{email}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        conversation = ConversationMemory(
-            conversation_id=conversation_id
-        )
-        self.conversations[conversation_id] = conversation
-        return conversation
-    
-    def get_current_conversation(self, email: str) -> ConversationMemory:
-        """Get the most recent conversation for a user."""
-        conversation_id = f"conv_{email}_{datetime.now().strftime('%Y%m%d')}"
-        if conversation_id not in self.conversations:
-            self.conversations[conversation_id] = ConversationMemory(
-                conversation_id=conversation_id
-            )
-        return self.conversations[conversation_id]
-    
-    def get_recent_messages(self, email: str, limit: int = 10) -> ConversationMemory:
-        """Get recent chat pairs from Firestore as ConversationMemory object."""
+    def get_recent_messages(self, email: str, limit: int = 10) -> List[MessagePair]:
+        """Get recent chat pairs from Firestore as List[MessagePair]."""
         today = datetime.now().strftime('%Y%m%d')
         conversation_id = f"conv_{today}"
         
         if not firebase_manager.db:
-            return ConversationMemory(conversation_id=conversation_id)
+            return []
         
         try:
             chat_ref = firebase_manager.db.collection('users').document(email).collection('conversations').document(conversation_id).collection('chat')
@@ -98,7 +79,6 @@ class MessageManager:
             chat_pair_list = []
             for doc in chat:
                 pair_data = doc.to_dict()
-                # Create MessagePair object from the data (handle both formats for compatibility)
                 user_message = UserMessage(
                     content=pair_data.get('user', ''),
                     emotion_detected=pair_data.get('emotion_detected') or pair_data.get('emotionDetected'),
@@ -118,26 +98,19 @@ class MessageManager:
                 )
                 chat_pair_list.append(chat_pair)
             
-            # Reverse to get chronological order (oldest first)
             chat_pair_list.reverse()
             
-            # Return ConversationMemory object
-            return ConversationMemory(
-                conversation_id=conversation_id,
-                chat=chat_pair_list,
-                summary="", 
-                key_topics=[]  
-            )
+            return chat_pair_list
             
         except Exception as e:
             print(f"ERROR: Error getting recent chat pairs: {e}")
         
-        return ConversationMemory(conversation_id=conversation_id)
+        return []
     
-    def get_conversation_by_date(self, email: str, date_str: str) -> Optional[ConversationMemory]:
-        """Get conversation data for a specific date, returning ConversationMemory object."""
+    def get_conversation_by_date(self, email: str, date_str: str) -> List[MessagePair]:
+        """Get conversation data for a specific date, returning list of MessagePair objects."""
         if not firebase_manager.db:
-            return None
+            return []
         
         try:
             conversation_id = f"conv_{date_str}"
@@ -145,7 +118,6 @@ class MessageManager:
             doc = doc_ref.get()
             
             if doc.exists:
-                # Get chat pairs and convert them to MessagePair objects
                 chat_ref = doc_ref.collection('chat')
                 pairs = list(chat_ref.order_by('timestamp').stream())
                 
@@ -183,21 +155,13 @@ class MessageManager:
                         print(f"Warning: Could not parse message pair: {e}")
                         continue
                 
-                # Create and return ConversationMemory object
-                conversation_memory = ConversationMemory(
-                    conversation_id=conversation_id,
-                    chat=message_pairs,
-                    summary="",
-                    key_topics=[]  
-                )
-                
-                return conversation_memory
+                return message_pairs
             
-            return None
+            return []
             
         except Exception as e:
             print(f"ERROR: Error getting conversation by date: {e}")
-            return None
+            return []
     
     def get_last_conversation_date(self, email: str) -> Optional[date]:
         """Get the date of user's last conversation."""

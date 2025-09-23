@@ -79,21 +79,12 @@ class SummaryManager:
             print(f"ERROR: Error getting daily summary: {e}")
             return None
     
-    def generate_conversation_summary(self, email: str, conversation_date: date) -> Optional[dict]:
-        """Generate or retrieve AI summary of a day's conversation using LLM."""
-        # Import here to avoid circular import
-        from message import message_manager
-        
-        date_str = conversation_date.strftime('%Y%m%d')
-        
-        # Get conversation data for the specified date
-        conversation_data = message_manager.get_conversation_by_date(email, date_str)
-        
-        if not conversation_data or len(conversation_data.chat) == 0:
+    def generate_conversation_summary(self, message_pairs: List[MessagePair]) -> Optional[str]:
+        """Generate AI summary of a conversation using LLM."""
+        if not message_pairs:
             return None
         
         # Build conversation text from MessagePair objects
-        message_pairs = conversation_data.chat
         conversation_text = ""
         
         for message_pair in message_pairs:
@@ -137,11 +128,7 @@ class SummaryManager:
             response = self.llm.invoke(messages)
             summary_text = response.content.strip()
             
-            summary = {
-                "date": conversation_date.strftime('%Y-%m-%d'),
-                "summary_text": summary_text
-            }
-            return summary
+            return summary_text
             
         except Exception as e:
             print(f"Warning: Could not generate summary: {e}")
