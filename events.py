@@ -26,7 +26,7 @@ class EventManager:
             google_api_key=config.gemini_api_key,
             temperature=0.3 
         )
-        self.db = firebase_manager.db  # Access to Firebase database
+        self.db = firebase_manager.db 
     
     def add_important_event(self, email: str, event: Event):
         """Add an important event to Firestore using subcollection."""
@@ -51,7 +51,7 @@ class EventManager:
         except Exception as e:
             print(f"ERROR: Error adding event: {e}")
     
-    def get_pending_events(self, email: str) -> List[Dict]:
+    def get_pending_events(self, email: str) -> List[Event]:
         """Get events that need follow-up for user."""
         if not self.db:
             return []
@@ -63,8 +63,21 @@ class EventManager:
             pending_events = []
             for doc in events:
                 event_data = doc.to_dict()
-                event_data['event_id'] = doc.id
-                pending_events.append(event_data)
+                
+                try:
+                    event = Event(
+                        eventid=doc.id, 
+                        eventType=event_data.get('eventType', ''),
+                        description=event_data.get('description', ''),
+                        eventDate=event_data.get('eventDate'),
+                        mentionedAt=event_data.get('mentionedAt', ''),
+                        followUpNeeded=event_data.get('followUpNeeded', True),
+                        followUpDone=event_data.get('followUpDone', False)
+                    )
+                    pending_events.append(event)
+                except Exception as parse_error:
+                    print(f"Warning: Could not parse event {doc.id}: {parse_error}")
+                    continue
             
             return pending_events
             
@@ -76,26 +89,12 @@ class EventManager:
     def detect_important_events(self, message: str, email: str) -> None:
         """Detect and store important upcoming events from user messages using LLM."""
         
-        # Use LLM to detect events and timing
-        event_detection = self._extract_events_with_llm(message)
+        event = self._extract_events_with_llm(message)
         
-        if event_detection and event_detection.get('has_event'):
-
-            event_date = self._parse_event_timing(event_detection.get('timing', ''), message)
-            
-            # Create and store the event
-            event = Event(
-                eventType=event_detection.get('event_type', 'event'),
-                description=message,
-                eventDate=event_date.isoformat() if event_date else None,
-                followUpNeeded=True,
-                followUpDone=False
-            )
-            
-            # Store event directly in Firebase events table
+        if event:
             self.add_important_event(email, event)
 
-    def _extract_events_with_llm(self, message: str) -> Optional[dict]:
+    def _extract_events_with_llm(self, message: str) -> Optional[Event]:
         """Use LLM to extract important events and timing from user messages."""
         system_prompt = """You are an expert at detecting important upcoming events or recent events that someone might want follow-up on. Analyze the user's message and determine:
 
@@ -127,20 +126,26 @@ class EventManager:
             response = self.llm.invoke(messages)
             response_text = response.content.strip()
             
-            # Parse JSON response
             try:
-                # Extract JSON from response if it's wrapped in text
                 if '{' in response_text and '}' in response_text:
                     start = response_text.find('{')
                     end = response_text.rfind('}') + 1
                     json_str = response_text[start:end]
                     event_data = json.loads(json_str)
                     
-                    # Validate the response structure
                     if isinstance(event_data, dict) and 'has_event' in event_data:
                         confidence = event_data.get('confidence', 0.0)
                         if event_data.get('has_event') and confidence >= 0.7:
-                            return event_data
+                            event_date = self._parse_event_timing(event_data.get('timing', ''), message)
+                    
+                            return Event(
+                                eventid="",
+                                eventType=event_data.get('event_type', 'event'),
+                                description=message,
+                                eventDate=event_date.isoformat() if event_date else None,
+                                followUpNeeded=True,
+                                followUpDone=False
+                            )
                         
             except json.JSONDecodeError:
                 pass
@@ -156,7 +161,6 @@ class EventManager:
         timing_lower = timing.lower()
         message_lower = original_message.lower()
         
-        # LLM-provided timing
         if 'tomorrow' in timing_lower:
             return today + timedelta(days=1)
         elif 'today' in timing_lower or 'tonight' in timing_lower:
@@ -170,7 +174,6 @@ class EventManager:
         elif 'next month' in timing_lower:
             return today + timedelta(days=30)
         
-        # Fallback to original message analysis for specific days
         days_of_week = {
             'monday': 0, 'tuesday': 1, 'wednesday': 2, 'thursday': 3,
             'friday': 4, 'saturday': 5, 'sunday': 6
@@ -188,26 +191,20 @@ class EventManager:
     def generate_proactive_greeting(self, email: str) -> Optional[str]:
         """Generate a personalized proactive greeting using LLM for important events."""
         user_profile = firebase_manager.get_user_profile(email)
-        name = user_profile.name or "friend"
+        name = user_profile.name 
         
         today = date.today()
         yesterday = today - timedelta(days=1)
-        
-        # STEP 1: Check if we need to generate yesterday's summary (first chat of new day)
-        summary_manager.generate_conversation_summary(email)
-        
-        # STEP 2: Get pending events from Firebase events table
         pending_events = self.get_pending_events(email)
         
-        for event_data in pending_events:
-            # Convert event_data to proper format for checking
-            event_date_str = event_data.get('eventDate')
-            if isinstance(event_date_str, str) and event_date_str:
-                event_date = datetime.fromisoformat(event_date_str).date()
-            else:
-                event_date = None
+        for event in pending_events:
+            event_date = None
+            if event.eventDate and isinstance(event.eventDate, str):
+                try:
+                    event_date = datetime.fromisoformat(event.eventDate).date()
+                except ValueError:
+                    continue
             
-            # Determine the timing context
             timing_context = ""
             if event_date == today:
                 timing_context = "today"
@@ -217,19 +214,8 @@ class EventManager:
                 days_until = (event_date - today).days
                 timing_context = f"in {days_until} day{'s' if days_until > 1 else ''}"
             else:
-                continue  # Skip events outside our follow-up window
+                continue  
             
-            # Create temporary event object for greeting generation
-            event = Event(
-                eventType=event_data['eventType'],
-                description=event_data['description'],
-                eventDate=event_date.isoformat() if event_date else None,
-                mentionedAt=event_data.get('mentionedAt', ''),
-                followUpNeeded=event_data.get('followUpNeeded', True),
-                followUpDone=event_data.get('followUpDone', False)
-            )
-            
-            # Generate personalized greeting using LLM
             return self._generate_event_greeting_with_llm(event, name, timing_context)
         
         return None
@@ -267,19 +253,14 @@ class EventManager:
             
             response = self.llm.invoke(messages)
             greeting = response.content.strip()
-            
-            # Remove any quotes that might wrap the response
+
             if greeting.startswith('"') and greeting.endswith('"'):
                 greeting = greeting[1:-1]
             
             return greeting
             
         except Exception as e:
-            # Simple fallback if LLM fails
-            if timing_context in ["today", "yesterday"]:
-                return f"Hey {name}! How did your {event.eventType} go {timing_context}?"
-            else:
-                return f"Hey {name}! How are you feeling about your upcoming {event.eventType}?"
+            pass
 
     def mark_event_followed_up(self, email: str, event_type: str) -> None:
         """Mark events as followed up after asking about them."""

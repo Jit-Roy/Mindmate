@@ -75,14 +75,13 @@ class HelperManager:
                 elif line.startswith("URGENCY:"):
                     try:
                         urgency_level = int(line.split(":", 1)[1].strip())
-                        urgency_level = max(1, min(5, urgency_level))  # Ensure 1-5 range
+                        urgency_level = max(1, min(5, urgency_level))  
                     except (ValueError, IndexError):
                         urgency_level = 1
             
             return emotion, urgency_level
             
         except Exception as e:
-            # Fallback: return neutral emotion and low urgency if LLM fails
             return "neutral", 1
 
     def generate_questions_and_suggestions(self, emotion: str, urgency_level: int, user_name: str, email: str, user_message: str = "") -> Tuple[List[str], List[str]]:

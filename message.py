@@ -1,12 +1,13 @@
 from typing import List, Dict, Optional
-from datetime import datetime, timezone, date
+from datetime import datetime, timezone, date, timedelta
 from firebase_admin import firestore
 from data import ConversationMemory, MessagePair, UserProfile, UserMessage, LLMMessage
 from config import config
 from firebase_manager import firebase_manager
 from summary import summary_manager
 from datetime import timezone
-from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+from langchain_google_genai import ChatGoogleGenerativeAI
 
 
 class MessageManager:
@@ -163,33 +164,38 @@ class MessageManager:
             print(f"ERROR: Error getting conversation by date: {e}")
             return []
     
-    def get_last_conversation_date(self, email: str) -> Optional[date]:
-        """Get the date of user's last conversation."""
+    def get_last_conversation_time(self, email: str) -> Optional[datetime]:
+        """Get the timestamp of the user's last message from any conversation date."""
         if not firebase_manager.db:
             return None
         
         try:
             conversations_ref = firebase_manager.db.collection('users').document(email).collection('conversations')
             conversations = conversations_ref.stream()
+            latest_timestamp = None
             
-            conversation_dates = []
             for doc in conversations:
                 conv_id = doc.id
                 if conv_id.startswith('conv_'):
-                    date_str = conv_id.replace('conv_', '')
                     try:
-                        conv_date = datetime.strptime(date_str, '%Y%m%d').date()
-                        conversation_dates.append(conv_date)
-                    except ValueError:
+                        chat_ref = conversations_ref.document(conv_id).collection('chat')
+                        last_message_query = chat_ref.order_by('timestamp', direction='DESCENDING').limit(1)
+                        last_messages = last_message_query.stream()
+                        
+                        for message_doc in last_messages:
+                            message_data = message_doc.to_dict()
+                            timestamp = message_data.get('timestamp')
+                            if timestamp:
+                                if latest_timestamp is None or timestamp > latest_timestamp:
+                                    latest_timestamp = timestamp
+                                    
+                    except Exception as conv_error:
+                        print(f"Warning: Error processing conversation {conv_id}: {conv_error}")
                         continue
-            
-            if conversation_dates:
-                return max(conversation_dates)
-            
-            return None
+            return latest_timestamp
             
         except Exception as e:
-            print(f"ERROR: Error getting last conversation date: {e}")
+            print(f"ERROR: Error getting last conversation time: {e}")
             return None
     
     def _is_first_chat_of_day(self, email: str) -> bool:
@@ -206,5 +212,118 @@ class MessageManager:
         except Exception as e:
             print(f"ERROR: Error checking first chat of day: {e}")
             return False
+
+    def generate_notification_text(self, email: str) -> str:
+        """Generate a short, comforting notification text based on recent activity and context."""
+        try:
+            now = datetime.now(timezone.utc)
+            today = now.strftime('%Y%m%d')
+            yesterday = (now - timedelta(days=1)).strftime('%Y%m%d')
+            
+            user_profile = firebase_manager.get_user_profile(email)
+            user_name = user_profile.name
+            last_message_time = self.get_last_conversation_time(email)
+            
+            if last_message_time:
+                try:
+                    if last_message_time.tzinfo is None:
+                        last_message_time = last_message_time.replace(tzinfo=timezone.utc)
+                    
+                    hours_since_last = (now - last_message_time).total_seconds() / 3600
+                    days_since_last = hours_since_last / 24
+                    
+                    # Don't send notification if too recent
+                    if hours_since_last < 6:  
+                        return ""
+                    
+                    # Determine which conversation to use based on when the last message was
+                    last_message_date = last_message_time.date()
+                    last_message_date_str = last_message_date.strftime('%Y%m%d')
+                    
+                    # Get conversation from the actual date of last message
+                    recent_messages = self.get_conversation_by_date(email, last_message_date_str)
+                    
+                    if recent_messages and len(recent_messages) > 0:
+                        if hours_since_last < 24:
+                            conversation_context = f"User has been away for {int(hours_since_last)} hours after chatting earlier today"
+                        elif days_since_last < 2:
+                            conversation_context = "User has been away since yesterday"
+                        else:
+                            conversation_context = f"User hasn't been active since {last_message_date.strftime('%B %d')}"
+                    else:
+                        conversation_context = f"Hey {user_name}, Missing you. Are you feeling okay??"
+                        
+                except Exception as tz_error:
+                    print(f"Timezone handling error: {tz_error}")
+                    conversation_context = f"Hey {user_name}, Missing you. Are you feeling okay??"
+            else:
+                # No messages found at all
+                return f"Hey {user_name}, Missing you. Are you feeling okay??"
+            
+            # Build context from recent messages
+            context_text = ""
+            if 'recent_messages' in locals():
+                for pair in recent_messages:
+                    context_text += f"User: {pair.user_message.content}\n"
+                    context_text += f"Assistant: {pair.llm_message.content}\n"
+            
+            llm = ChatGoogleGenerativeAI(
+                model=config.model_name,
+                google_api_key=config.gemini_api_key,
+                temperature=0.8
+            )
+            
+            system_prompt = """You are a formal but caring big brother. Generate a SHORT notification (maximum 15 words) in the FORMAL BIG BROTHER + 2 QUESTIONS + CONCERN style.
+
+            REQUIRED STYLE FORMAT:
+            "[Name], [first concern question]? [second supportive question]??"
+
+            GUIDELINES:
+            - Always ask 2 short questions, both ending with "?" (second one with "??").
+            - Keep total length under 15 words.
+            - Maintain a formal yet caring big brother tone.
+            - Show genuine concern based on their situation.
+
+            QUESTION STARTERS: "How was", "Feeling", "Still", "Is", "Did", "Was", "Are you"
+            TONE: Warm, supportive, checking in with care.
+
+            EXAMPLES:
+            - "Alex, how was class today? Feeling better now??"
+            - "Sarah, was chemistry easier? Less stress this time??"
+            - "Emma, was your day kind? Heart calmer this evening??"
+            """
+            
+            human_prompt = f"""Analyze this conversation with {user_name} and create a FORMAL BIG BROTHER notification:
+
+            USER SITUATION: {conversation_context if 'conversation_context' in locals() else "User has been away for several hours"}
+
+            RECENT CONVERSATION:
+            {context_text if context_text else "No recent conversation available"}
+
+            TASK: Create a notification using this EXACT FORMAT:
+            "[Name], [first concern question]? [second supportive question]??"
+
+            The notification must be under 15 words, show concern, and match their current situation.
+            """
+            
+            messages = [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=human_prompt)
+            ]
+            
+            response = llm.invoke(messages)
+            notification_text = response.content.strip()
+            
+            # Remove quotes if LLM wrapped the response
+            if notification_text.startswith('"') and notification_text.endswith('"'):
+                notification_text = notification_text[1:-1]
+            
+            return notification_text
+            
+        except Exception as e:
+            print(f"ERROR: Error generating notification text: {e}")
+            user_profile = firebase_manager.get_user_profile(email)
+            user_name = user_profile.name 
+            return f"Hey {user_name}, Missing you. Are you feeling okay??"
 
 message_manager = MessageManager()
