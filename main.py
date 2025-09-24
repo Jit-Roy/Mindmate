@@ -42,8 +42,8 @@ def android_chat(user_prompt, user_email="arientific@gmail.com"):
 
         event_manager.detect_important_events(user_prompt, user_email)
         context = message_manager.get_conversation_context(user_email)
-        recent_messages = message_manager.get_recent_messages(user_email, 20)
-        conversation_depth = len(recent_messages.chat) if recent_messages and recent_messages.chat else 0
+        recent_messages = message_manager.get_conversation(user_email, limit=20)
+        conversation_depth = len(recent_messages) if recent_messages else 0
         
         if urgency_level >= 5:
             crisis_response = crisis_manager.handle_crisis_situation(user_prompt, user_name)

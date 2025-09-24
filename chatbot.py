@@ -147,7 +147,7 @@ class MentalHealthChatbot:
         event_manager.detect_important_events(message, email)
         
         # Get conversation context BEFORE adding the current message
-        recent_messages = self.message_manager.get_recent_messages(email, 20)
+        recent_messages = self.message_manager.get_conversation(email, limit=20)
         user_profile = firebase_manager.get_user_profile(email)
         
         # Check if this is a crisis situation - only trigger for urgency level 5 (extreme)
@@ -167,7 +167,7 @@ class MentalHealthChatbot:
             return crisis_response
         
         # Build conversation for LLM - work directly with ConversationMemory
-        recent_messages = self.message_manager.get_recent_messages(email, 20)
+        recent_messages = self.message_manager.get_conversation(email, limit=20)
         
         # Create the prompt with user profile and recent conversation info
         enhanced_prompt = f"""{self.system_prompt}
@@ -210,7 +210,7 @@ class MentalHealthChatbot:
         messages = [SystemMessage(content=enhanced_prompt)]
         
         # Add conversation history from recent messages
-        for msg_pair in recent_messages.chat:
+        for msg_pair in recent_messages:
             messages.append(HumanMessage(content=msg_pair.user_message.content))
             messages.append(AIMessage(content=msg_pair.llm_message.content))
         

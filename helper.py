@@ -101,13 +101,13 @@ class HelperManager:
         name = user_name or "friend"
         
         # Get conversation context
-        recent_messages = message_manager.get_recent_messages(email, 10)
-        conversation_depth = len(recent_messages.chat) if recent_messages and recent_messages.chat else 0
+        recent_messages = message_manager.get_conversation(email, limit=10)
+        conversation_depth = len(recent_messages) if recent_messages else 0
         
         # Build conversation history for context
         conversation_context = ""
-        if recent_messages and recent_messages.chat:
-            for msg_pair in recent_messages.chat[-5:]:  # Last 5 messages for context
+        if recent_messages:
+            for msg_pair in recent_messages[-5:]:  # Last 5 messages for context
                 conversation_context += f"User: {msg_pair.user_message.content}\n"
                 conversation_context += f"Assistant: {msg_pair.llm_message.content}\n"
 

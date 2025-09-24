@@ -65,105 +65,86 @@ class MessageManager:
         except Exception as e:
             print(f"ERROR: Error adding chat pair: {e}")
     
-    def get_recent_messages(self, email: str, limit: int = 10) -> List[MessagePair]:
-        """Get recent chat pairs from Firestore as List[MessagePair]."""
-        today = datetime.now().strftime('%Y%m%d')
-        conversation_id = f"conv_{today}"
+    def get_conversation(self, email: str, date: Optional[str] = None, limit: Optional[int] = None) -> List[MessagePair]:
+        """
+        Get conversation messages for a specific date with optional limit.
         
+        Args:
+            email: User's email address
+            date: Date string in YYYYMMDD format. If None, uses today's date.
+            limit: Maximum number of messages to return. If None, returns all messages. When limit is specified, returns the most recent messages first.
+        
+        Returns:
+            List[MessagePair]: List of message pairs ordered chronologically (oldest first) unless limited, then most recent messages are returned.
+        """
         if not firebase_manager.db:
             return []
         
-        try:
-            chat_ref = firebase_manager.db.collection('users').document(email).collection('conversations').document(conversation_id).collection('chat')
-            chat = chat_ref.order_by('timestamp', direction=firestore.Query.DESCENDING).limit(limit).stream()
-            
-            chat_pair_list = []
-            for doc in chat:
-                pair_data = doc.to_dict()
-                user_message = UserMessage(
-                    content=pair_data.get('user', ''),
-                    emotion_detected=pair_data.get('emotion_detected') or pair_data.get('emotionDetected'),
-                    urgency_level=pair_data.get('urgency_level') or pair_data.get('urgencyLevel', 1)
-                )
-                
-                llm_message = LLMMessage(
-                    content=pair_data.get('model', ''),
-                    suggestions=pair_data.get('suggestions', []),
-                    follow_up_questions=pair_data.get('follow_up_questions', [])
-                )
-                
-                chat_pair = MessagePair(
-                    user_message=user_message,
-                    llm_message=llm_message,
-                    timestamp=pair_data.get('timestamp', datetime.now())
-                )
-                chat_pair_list.append(chat_pair)
-            
-            chat_pair_list.reverse()
-            
-            return chat_pair_list
-            
-        except Exception as e:
-            print(f"ERROR: Error getting recent chat pairs: {e}")
-        
-        return []
-    
-    def get_conversation_by_date(self, email: str, date_str: str) -> List[MessagePair]:
-        """Get conversation data for a specific date, returning list of MessagePair objects."""
-        if not firebase_manager.db:
-            return []
+        # Use today's date if no date provided
+        if date is None:
+            date = datetime.now().strftime('%Y%m%d')
         
         try:
-            conversation_id = f"conv_{date_str}"
+            conversation_id = f"conv_{date}"
             doc_ref = firebase_manager.db.collection('users').document(email).collection('conversations').document(conversation_id)
             doc = doc_ref.get()
             
-            if doc.exists:
-                chat_ref = doc_ref.collection('chat')
-                pairs = list(chat_ref.order_by('timestamp').stream())
-                
-                message_pairs = []
-                
-                for pair in pairs:
-                    pair_data = pair.to_dict()
-                    
-                    try:
-                        # Create UserMessage
-                        user_message = UserMessage(
-                            content=pair_data.get('user', ''),
-                            emotion_detected=pair_data.get('emotion_detected') or pair_data.get('emotionDetected'),
-                            urgency_level=pair_data.get('urgency_level') or pair_data.get('urgencyLevel', 1)
-                        )
-                        
-                        # Create LLMMessage  
-                        llm_message = LLMMessage(
-                            content=pair_data.get('model', ''),
-                            suggestions=pair_data.get('suggestions', []),
-                            follow_up_questions=pair_data.get('follow_up_questions', [])
-                        )
-                        
-                        # Create MessagePair
-                        message_pair = MessagePair(
-                            user_message=user_message,
-                            llm_message=llm_message,
-                            timestamp=pair_data.get('timestamp', datetime.now()),
-                            conversation_id=conversation_id
-                        )
-                        
-                        message_pairs.append(message_pair)
-                        
-                    except Exception as e:
-                        print(f"Warning: Could not parse message pair: {e}")
-                        continue
-                
-                return message_pairs
+            if not doc.exists:
+                return []
             
-            return []
+            chat_ref = doc_ref.collection('chat')
+            
+            # Apply limit if specified (get most recent messages)
+            if limit is not None:
+                query = chat_ref.order_by('timestamp', direction='DESCENDING').limit(limit)
+                pairs = list(query.stream())
+                # Reverse to get chronological order (oldest first)
+                pairs.reverse()
+            else:
+                # Get all messages in chronological order
+                query = chat_ref.order_by('timestamp')
+                pairs = list(query.stream())
+            
+            message_pairs = []
+            
+            for pair in pairs:
+                pair_data = pair.to_dict()
+                
+                try:
+                    # Create UserMessage
+                    user_message = UserMessage(
+                        content=pair_data.get('user', ''),
+                        emotion_detected=pair_data.get('emotion_detected') or pair_data.get('emotionDetected'),
+                        urgency_level=pair_data.get('urgency_level') or pair_data.get('urgencyLevel', 1)
+                    )
+                    
+                    # Create LLMMessage  
+                    llm_message = LLMMessage(
+                        content=pair_data.get('model', ''),
+                        suggestions=pair_data.get('suggestions', []),
+                        follow_up_questions=pair_data.get('follow_up_questions', [])
+                    )
+                    
+                    # Create MessagePair
+                    message_pair = MessagePair(
+                        user_message=user_message,
+                        llm_message=llm_message,
+                        timestamp=pair_data.get('timestamp', datetime.now()),
+                        conversation_id=conversation_id
+                    )
+                    
+                    message_pairs.append(message_pair)
+                    
+                except Exception as e:
+                    print(f"Warning: Could not parse message pair: {e}")
+                    continue
+            
+            return message_pairs
             
         except Exception as e:
-            print(f"ERROR: Error getting conversation by date: {e}")
+            print(f"ERROR: Error getting conversation: {e}")
             return []
-    
+
     def get_last_conversation_time(self, email: str) -> Optional[datetime]:
         """Get the timestamp of the user's last message from any conversation date."""
         if not firebase_manager.db:
@@ -241,7 +222,7 @@ class MessageManager:
                     last_message_date_str = last_message_date.strftime('%Y%m%d')
                     
                     # Get conversation from the actual date of last message
-                    recent_messages = self.get_conversation_by_date(email, last_message_date_str)
+                    recent_messages = self.get_conversation(email, last_message_date_str)
                     
                     if recent_messages and len(recent_messages) > 0:
                         if hours_since_last < 24:
