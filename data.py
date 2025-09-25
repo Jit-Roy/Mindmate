@@ -8,10 +8,9 @@ class Event(BaseModel):
     eventid: str
     eventType: str  # 'exam', 'interview', 'appointment'
     description: str  
-    eventDate: Optional[str] = None 
+    eventDate: str  
     mentionedAt: str = Field(default_factory=lambda: datetime.now().isoformat())  
-    followUpNeeded: bool = True
-    followUpDone: bool = False
+    isCompleted: bool = False 
 
 
 class UserProfile(BaseModel):
