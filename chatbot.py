@@ -1,5 +1,3 @@
-import random
-import asyncio
 from datetime import datetime, date
 from typing import List, Optional
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -62,7 +60,7 @@ class MentalHealthChatbot:
         - Remind them of their strengths and support system
         - Example: "Hey, I can tell this is really affecting you. You don't have to go through this alone"
 
-        � CRISIS MODE (suicidal thoughts, severe depression, immediate danger):
+        🛑 CRISIS MODE (suicidal thoughts, severe depression, immediate danger):
         - NOW you become passionate and protective
         - Fight back against harmful thoughts aggressively but lovingly
         - Remind them of people who love them (family, friends, partners)
@@ -109,7 +107,7 @@ class MentalHealthChatbot:
         user_profile = firebase_manager.get_user_profile(email)
         user_name = user_profile.name
         
-        # Check for pending events and generate proactive greeting
+        # Check for pending events and generate greeting
         greeting, _ = daily_task_manager.daily_task(email)
         
         # Check if message is mental health related
@@ -119,7 +117,7 @@ class MentalHealthChatbot:
         if not topic_filter.is_mental_health_related:
             redirect_response = "Sorry but i can not answer to that question!!!."
             
-            MessageManager.add_chat_pair(
+            self.message_manager.add_chat_pair(
                 email=email,
                 user_message=message,
                 model_response=redirect_response,
@@ -141,7 +139,7 @@ class MentalHealthChatbot:
         if urgency_level >= 5:
             crisis_response = crisis_manager.handle_crisis_situation(message, user_name)
 
-            MessageManager.add_chat_pair(
+            self.message_manager.add_chat_pair(
                 email=email,
                 user_message=message,
                 model_response=crisis_response.content,
@@ -174,36 +172,35 @@ class MentalHealthChatbot:
         - 3-5 exchanges: Start exploring their situation more
         - 6+ exchanges with emotional content: NOW you can ask about sleep, food, family, relationships naturally
 
+        💡 FOLLOW-UP QUESTIONS GUIDANCE:
+        Based on the user's emotional state and urgency level, naturally include 1-2 thoughtful follow-up questions in your response that:
+        - Are appropriate for their current emotional state and urgency level
+        - Help them explore their feelings or situation deeper
+        - Show genuine care and interest in their wellbeing
+        - Match the conversation depth (don't ask personal questions too early)
+        - Are contextually relevant to what they've shared
+
         Remember to:
         1. Address them by their preferred name: {user_name}
         2. Reference relevant past conversations
         3. Match your tone to their ACTUAL emotional state
         4. Only escalate intensity if urgency level is high
         5. If there's a proactive greeting above, start with that
+        6. Include natural, caring follow-up questions within your response
         """
         
         # Build messages for LLM
-        from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
         messages = [SystemMessage(content=enhanced_prompt)]
         
         # Convert MessagePair objects to proper message format
         if recent_messages:
-            for msg_pair in recent_messages[-10:]:  
+            for msg_pair in recent_messages:  
                 messages.append(HumanMessage(content=msg_pair.user_message.content))
                 messages.append(AIMessage(content=msg_pair.llm_message.content))
         
         messages.append(HumanMessage(content=message))
         response = self.llm.invoke(messages)
         bot_message = response.content
-        
-        # Generate follow-up questions and suggestions
-        try:
-            follow_up_questions, suggestions = helper_manager.generate_questions_and_suggestions(
-                emotion, urgency_level, user_name, email, message
-            )
-        except:
-            follow_up_questions = []
-            suggestions = []
         
         # Save interaction
         self.message_manager.add_chat_pair(
@@ -214,4 +211,4 @@ class MentalHealthChatbot:
             urgency_level=urgency_level
         )
         
-        return {"message": "SUCCESS"}
+        return bot_message

@@ -8,6 +8,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import SystemMessage, HumanMessage
 from config import config
 from message import message_manager
+from firebase_manager import firebase_manager
 
 
 class HelperManager:
@@ -84,9 +85,9 @@ class HelperManager:
         except Exception as e:
             return "neutral", 1
 
-    def generate_questions_and_suggestions(self, emotion: str, urgency_level: int, user_name: str, email: str, user_message: str = "") -> Tuple[List[str], List[str]]:
+    def generate_suggestions(self, emotion: str, urgency_level: int, email: str, user_message: str = "") -> List[str]:
         """
-        Generate both follow-up questions and suggestions in a single API call.
+        Generate practical suggestions based on user's emotional state and conversation context.
         
         Args:
             emotion: The detected emotion
@@ -96,13 +97,13 @@ class HelperManager:
             user_message: Current user message
             
         Returns:
-            Tuple of (follow_up_questions, suggestions)
+            List of practical suggestions
         """
-        name = user_name or "friend"
+        user_profile = firebase_manager.get_user_profile(email)
+        name = user_profile.name
         
         # Get conversation context
         recent_messages = message_manager.get_conversation(email, limit=10)
-        conversation_depth = len(recent_messages) if recent_messages else 0
         
         # Build conversation history for context
         conversation_context = ""
@@ -111,112 +112,79 @@ class HelperManager:
                 conversation_context += f"User: {msg_pair.user_message.content}\n"
                 conversation_context += f"Assistant: {msg_pair.llm_message.content}\n"
 
-        system_prompt = f"""You are a caring mental health companion. Generate BOTH follow-up questions AND suggestions for someone based on their emotional state and conversation context.
+        system_prompt = f"""You are a caring mental health companion. Generate practical suggestions for someone based on their emotional state and conversation context.
 
         CONTEXT:
         - User's name: {name}
         - Current emotion: {emotion}
         - Urgency level: {urgency_level}/5 (1=casual, 2=mild concern, 3=moderate distress, 4=high distress, 5=crisis)
-        - Conversation depth: {conversation_depth} messages exchanged
 
         GUIDELINES BY URGENCY LEVEL:
-        - Level 1-2: Casual, supportive questions and gentle self-care suggestions
-        - Level 3: More caring questions about well-being and focused coping strategies
-        - Level 4-5: Questions about safety/support systems and immediate help suggestions
+        - Level 1-2: Gentle self-care suggestions and positive activities
+        - Level 3: Focused coping strategies and stress management techniques
+        - Level 4-5: Immediate help suggestions and safety-focused recommendations
 
         CONVERSATION DEPTH GUIDELINES:
-        - Early conversation (1-3 messages): General, rapport-building questions
-        - Developing relationship (4-10 messages): More personal but gentle questions  
-        - Deeper relationship (10+ messages): Can ask about family, relationships, self-care naturally
+        - Early conversation (1-3 messages): General wellness suggestions
+        - Developing relationship (4-10 messages): More personalized recommendations
+        - Deeper relationship (10+ messages): Can suggest specific lifestyle changes or reaching out to support systems
 
         Recent conversation context:
         {conversation_context}
 
         RESPONSE FORMAT:
-        Generate your response in this EXACT format:
-
-        QUESTIONS:
-        [2-3 thoughtful follow-up questions, one per line]
-
-        SUGGESTIONS:
-        [3 practical suggestions, one per line]
+        Generate 3-4 practical suggestions, one per line, without any headers or formatting.
 
         REQUIREMENTS:
-        - Questions should show genuine care and help explore feelings deeper
-        - Questions should be conversational, not clinical
-        - Use {name} naturally when appropriate
         - Suggestions should be immediately helpful and actionable
         - Suggestions should be specific (not generic advice)
+        - Use {name} naturally when appropriate
         - Match urgency level appropriately
-        - Each suggestion should be 1-2 sentences max"""
+        - Each suggestion should be 1-2 sentences max
+        - Focus on practical steps they can take right now"""
 
         try:
             messages = [
                 SystemMessage(content=system_prompt),
-                HumanMessage(content=f"Current user message: '{user_message}' | Generate empathetic follow-up questions and practical suggestions for someone feeling {emotion} at urgency level {urgency_level}/5.")
+                HumanMessage(content=f"Current user message: '{user_message}' | Generate practical suggestions for someone feeling {emotion} at urgency level {urgency_level}/5.")
             ]
             
             response = self.llm.invoke(messages)
             response_text = response.content.strip()
+            suggestions = self._parse_suggestions(response_text)
             
-            # Parse the response to extract questions and suggestions
-            questions, suggestions = self._parse_response(response_text)
-            
-            return questions, suggestions
+            return suggestions
             
         except Exception as e:
-            # Return empty lists if there's an error
-            return [], []
+            return []
 
-    def _parse_response(self, response_text: str) -> Tuple[List[str], List[str]]:
+    def _parse_suggestions(self, response_text: str) -> List[str]:
         """
-        Parse the LLM response to extract questions and suggestions.
+        Parse the LLM response to extract suggestions.
         
         Args:
             response_text: The raw response from the LLM
             
         Returns:
-            Tuple of (questions, suggestions)
+            List of suggestions
         """
-        questions = []
         suggestions = []
         
         try:
-            # Split response into sections
-            sections = response_text.split("SUGGESTIONS:")
-            
-            if len(sections) >= 2:
-                # Extract questions section
-                questions_section = sections[0].replace("QUESTIONS:", "").strip()
-                questions = [
-                    q.strip() 
-                    for q in questions_section.split('\n') 
-                    if q.strip() and '?' in q
-                ][:3]  # Max 3 questions
-                
-                # Extract suggestions section
-                suggestions_section = sections[1].strip()
-                suggestions = [
-                    s.strip() 
-                    for s in suggestions_section.split('\n') 
-                    if s.strip()
-                ][:3]  # Max 3 suggestions
-            
-            # Fallback: try to extract any questions and suggestions from the text
-            if not questions or not suggestions:
-                lines = response_text.split('\n')
-                for line in lines:
-                    line = line.strip()
-                    if line and '?' in line and len(questions) < 3:
-                        questions.append(line)
-                    elif line and '?' not in line and line and len(suggestions) < 3:
-                        suggestions.append(line)
+            # Split response into lines and extract meaningful suggestions
+            lines = response_text.split('\n')
+            for line in lines:
+                line = line.strip()
+                # Skip empty lines and headers
+                if line and not line.upper().startswith(('SUGGESTIONS:', 'QUESTIONS:')):
+                    # Remove bullet points or numbering if present
+                    cleaned_line = line.lstrip('- •*123456789. ')
+                    if cleaned_line and len(suggestions) < 4:  # Max 4 suggestions
+                        suggestions.append(cleaned_line)
             
         except Exception:
             pass
         
-        return questions, suggestions
+        return suggestions
 
-
-# Create a global instance
 helper_manager = HelperManager()
