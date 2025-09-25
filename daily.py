@@ -3,7 +3,6 @@ Daily Task Manager
 Handles all daily operations including summary creation, notifications, greetings, and message updates
 """
 
-import asyncio
 from datetime import datetime, date, timedelta
 from typing import List, Optional, Dict, Any
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -27,16 +26,22 @@ class DailyTaskManager:
             temperature=0.7
         )
         
-    def daily_task(self, email: str) -> None:
+    def daily_task(self, email: str):
         """Generate a personalized daily greeting based on user's recent activity."""
+        # Generate Greeting
         events = event_manager.get_events(email)
         greeting = event_manager._generate_event_greeting(events, email)
-        event_manager.delete_events(events, email)
+        event_manager.delete_events(events, email) 
+
+        # Send Notification
         notification = message_manager.generate_notification_text(email)
 
+        # Store Daily Summary
         today = date.today().isoformat()
-
         last_message_date = message_manager.get_last_conversation_time(email)
         last_day_conversation = message_manager.get_conversation(email, last_message_date)
         conversation_summary = summary_manager.generate_conversation_summary(last_day_conversation)
         summary_manager.store_daily_summary(email, today, {"summary_text": conversation_summary})
+        return greeting, notification
+    
+daily_task_manager = DailyTaskManager() 

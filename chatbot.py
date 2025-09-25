@@ -13,8 +13,7 @@ from summary import summary_manager
 from events import event_manager
 from crisis import crisis_manager
 from helper import helper_manager
-from daily import daily_task_manager, generate_event_greeting, get_user_daily_context
-
+from daily import daily_task_manager
 
 
 class MentalHealthChatbot:
@@ -114,7 +113,7 @@ class MentalHealthChatbot:
             summary_manager.generate_conversation_summary(email)
             
             # Check for pending events and generate proactive greeting
-            greeting = generate_event_greeting(email)
+            greeting, _ = daily_task_manager.daily_task(email)
             
             # Check if message is mental health related
             topic_filter = self.health_filter.filter(message)
@@ -144,7 +143,7 @@ class MentalHealthChatbot:
             conversation_depth = len(recent_messages) if recent_messages else 0
             
             # Get daily context for enhanced conversation
-            daily_context = get_user_daily_context(email)
+            daily_context = self.message_manager.get_conversation(email, date.today().isoformat())
             
             # Handle crisis situations
             if urgency_level >= 5:
@@ -162,11 +161,10 @@ class MentalHealthChatbot:
             
             # Build enhanced prompt
             conversation_history = self.message_manager.build_conversation_history(email)
-            enhanced_prompt = f"""{self.system_prompt}
-
+            enhanced_prompt = f"""
+            {self.system_prompt}
             CONVERSATION CONTEXT:
             {context}
-
             {daily_context}
 
             {f"PROACTIVE GREETING: You should start your response with this caring follow-up: '{greeting}'" if greeting else ""}
@@ -308,22 +306,3 @@ class MentalHealthChatbot:
                 )
                 
                 return {"message": "SUCCESS"}
-
-    def process_user_daily_tasks(self, email: str) -> dict:
-        """Process daily tasks for a specific user."""
-        try:
-            results = daily_task_manager.process_daily_tasks(email)
-            return {"message": "SUCCESS", "tasks_completed": results}
-        except Exception as e:
-            print(f"ERROR: Failed to process daily tasks for {email}: {e}")
-            return {"message": "ERROR", "error": str(e)}
-
-    def get_user_daily_stats(self, email: str) -> dict:
-        """Get daily statistics for a user."""
-        try:
-            from daily import get_daily_stats
-            stats = get_daily_stats(email)
-            return {"message": "SUCCESS", "stats": stats}
-        except Exception as e:
-            print(f"ERROR: Failed to get daily stats for {email}: {e}")
-            return {"message": "ERROR", "error": str(e)}
