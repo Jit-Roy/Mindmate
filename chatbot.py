@@ -104,152 +104,156 @@ class MentalHealthChatbot:
 
         Remember: You can be caring and supportive without being aggressive. Save the intense, protective energy for when someone actually needs saving."""
 
-    async def chat(self, email: str, message: str) -> LLMMessage:
-        """Main chat method that processes user input and generates response."""
-        
-        # Check if we should generate a proactive greeting first
-        pending_events = event_manager.get_pending_events(email)
-        
-        if pending_events:
-            greeting = event_manager._generate_event_greeting_with_llm(pending_events, email)
-        
-        # Check if message is mental health related
-        topic_filter = self.health_filter.filter(message)
-        
-        if not topic_filter.is_mental_health_related:
-            redirect_response = "Sorry but i can not answer to that question!!!."
+    def process_conversation(self, email: str, message: str) -> str:
+        """Unified conversation processing method for both sync and async usage."""
+        try:
+            # Get user profile and generate conversation summary
+            user_profile = firebase_manager.get_user_profile(email)
+            user_name = user_profile.name
+            summary_manager.generate_conversation_summary(email)
             
-            # Detect emotion and urgency for the redirect response
+            # Check for pending events and generate proactive greeting
+            pending_events = event_manager.get_events(email)
+            greeting = None
+            if pending_events:
+                greeting = event_manager._generate_event_greeting(pending_events, email)
+            
+            # Check if message is mental health related
+            topic_filter = self.health_filter.filter(message)
             emotion, urgency_level = helper_manager.detect_emotion(message)
             
-            # Define redirect suggestions and questions
-            redirect_suggestions = ["Tell me how you're feeling today", "Share what's on your mind"]
-            redirect_questions = ["How are you doing emotionally?", "What's been on your mind lately?"]
+            if not topic_filter.is_mental_health_related:
+                redirect_response = "Sorry but i can not answer to that question!!!."
+                
+                MessageManager.add_chat_pair(
+                    email=email,
+                    user_message=message,
+                    model_response=redirect_response,
+                    emotion_detected=emotion,
+                    urgency_level=urgency_level
+                )
+                
+                return redirect_response
             
-            # Save the interaction with redirect using add_chat_pair
-            firebase_manager.add_chat_pair(
-                email=email,
-                user_message=message,
-                model_response=redirect_response,
-                emotion_detected=emotion,
-                urgency_level=urgency_level,
-                suggestions=redirect_suggestions,
-                follow_up_questions=redirect_questions
-            )
+            # Detect and store important events
+            event = event_manager._extract_events_with_llm(message, email)
+            if event:
+                event_manager.add_event(email, event)
             
-            return LLMMessage(
-                content=redirect_response,
-                suggestions=redirect_suggestions,
-                follow_up_questions=redirect_questions
-            )
-        
-        # Detect emotion and urgency for mental health messages
-        emotion, urgency_level = helper_manager.detect_emotion(message)
-        
-        # Detect and store important events
-        event = event_manager._extract_events_with_llm(message, email)
-        if event:
-            event_manager.add_important_event(email, event)
-        
-        # Get conversation context BEFORE adding the current message
-        recent_messages = self.message_manager.get_conversation(email, limit=20)
-        user_profile = firebase_manager.get_user_profile(email)
-        
-        # Check if this is a crisis situation - only trigger for urgency level 5 (extreme)
-        if urgency_level >= 5:
-            crisis_response = crisis_manager.handle_crisis_situation(message, user_profile.name)
+            # Get conversation context
+            context = self.message_manager.get_conversation_context(email)
+            recent_messages = self.message_manager.get_conversation(email, limit=20)
+            conversation_depth = len(recent_messages) if recent_messages else 0
             
-            # Save crisis interaction using add_chat_pair
-            firebase_manager.add_chat_pair(
-                email=email,
-                user_message=message,
-                model_response=crisis_response.content,
-                emotion_detected=emotion,
-                urgency_level=urgency_level,
-                suggestions=crisis_response.suggestions,
-                follow_up_questions=crisis_response.follow_up_questions
-            )
-            return crisis_response
-        
-        # Build conversation for LLM - work directly with ConversationMemory
-        recent_messages = self.message_manager.get_conversation(email, limit=20)
-        
-        # Create the prompt with user profile and recent conversation info
-        enhanced_prompt = f"""{self.system_prompt}
+            # Handle crisis situations
+            if urgency_level >= 5:
+                crisis_response = crisis_manager.handle_crisis_situation(message, user_name)
 
-        USER PROFILE:
-        - Name: {user_profile.name or 'friend'}
-        - Username: {user_profile.username or 'Not set'}
-        - Age: {user_profile.age or 'Not specified'}
-        - Gender: {user_profile.gender or 'Not specified'}
+                MessageManager.add_chat_pair(
+                    email=email,
+                    user_message=message,
+                    model_response=crisis_response.content,
+                    emotion_detected=emotion,
+                    urgency_level=urgency_level
+                )
+                
+                return crisis_response.content
+            
+            # Build enhanced prompt
+            conversation_history = self.message_manager.build_conversation_history(email)
+            enhanced_prompt = f"""{self.system_prompt}
 
-        {f"PROACTIVE GREETING: You should start your response with this caring follow-up: '{greeting}'" if greeting else ""}
+            CONVERSATION CONTEXT:
+            {context}
 
-        CURRENT USER STATE:
-        - Detected emotion: {emotion}
-        - Urgency level: {urgency_level}/5
-        - User prefers to be called: {user_profile.name}
+            {f"PROACTIVE GREETING: You should start your response with this caring follow-up: '{greeting}'" if greeting else ""}
 
-        🎯 RESPONSE GUIDANCE BASED ON URGENCY LEVEL:
+            CURRENT USER STATE:
+            - Detected emotion: {emotion}
+            - Urgency level: {urgency_level}/5
+            - User prefers to be called: {user_name}
+            - Conversation depth: {conversation_depth} messages
 
-        Level 1-2 (Casual/Mild): Be supportive but relaxed. Don't overreact. Match their energy level.
-        Level 3 (Moderate): Show more concern and support. Ask deeper questions but stay calm.
-        Level 4-5 (Crisis): NOW use your passionate, protective mode. Fight for them!
+            🎯 RESPONSE GUIDANCE BASED ON URGENCY LEVEL:
+            Level 1-2 (Casual/Mild): Be supportive but relaxed. Don't overreact. Match their energy level.
+            Level 3 (Moderate): Show more concern and support. Ask deeper questions but stay calm.
+            Level 4-5 (Crisis): NOW use your passionate, protective mode. Fight for them!
 
-        🤗 CONVERSATION DEPTH GUIDANCE:
-        - First 1-2 exchanges: Keep it general, build rapport
-        - 3-5 exchanges: Start exploring their situation more
-        - 6+ exchanges with emotional content: NOW you can ask about sleep, food, family, relationships naturally
+            🤗 CONVERSATION DEPTH GUIDANCE:
+            - First 1-2 exchanges: Keep it general, build rapport
+            - 3-5 exchanges: Start exploring their situation more
+            - 6+ exchanges with emotional content: NOW you can ask about sleep, food, family, relationships naturally
 
-        IMPORTANT: Do not assume crisis or depression unless urgency level is 3+. For levels 1-2, be a normal supportive friend.
-
-        Remember to:
-        1. Address them by their preferred name
-        2. Reference relevant past conversations
-        3. Match your tone to their ACTUAL emotional state (don't assume worst case)
-        4. Only escalate intensity if urgency level is high
-        5. Acknowledge time passed since last conversation if applicable
-        6. If there's a proactive greeting above, start with that and then naturally flow into responding to their current message"""
-        
-        # Build message list for the LLM directly from ConversationMemory
-        messages = [SystemMessage(content=enhanced_prompt)]
-        
-        # Add conversation history from recent messages
-        for msg_pair in recent_messages:
-            messages.append(HumanMessage(content=msg_pair.user_message.content))
-            messages.append(AIMessage(content=msg_pair.llm_message.content))
-        
-        # Add current user message
-        messages.append(HumanMessage(content=message))
-        
-        try:
-            # Get response from LLM
-            response = await self.llm.ainvoke(messages)
+            Remember to:
+            1. Address them by their preferred name: {user_name}
+            2. Reference relevant past conversations
+            3. Match your tone to their ACTUAL emotional state
+            4. Only escalate intensity if urgency level is high
+            5. If there's a proactive greeting above, start with that
+            """
+            
+            # Build messages for LLM
+            from langchain_core.messages import SystemMessage, HumanMessage
+            messages = [SystemMessage(content=enhanced_prompt)]
+            for msg in conversation_history[-10:]:
+                messages.append(msg)
+            
+            messages.append(HumanMessage(content=message))
+            response = self.llm.invoke(messages)
             bot_message = response.content
             
-            # Generate follow-up questions and suggestions in single API call
-            follow_up_questions, suggestions = helper_manager.generate_questions_and_suggestions(
-                emotion, urgency_level, user_profile.name, email, message
-            )
+            # Generate follow-up questions and suggestions
+            try:
+                follow_up_questions, suggestions = helper_manager.generate_questions_and_suggestions(
+                    emotion, urgency_level, user_name, email, message
+                )
+            except:
+                follow_up_questions = []
+                suggestions = []
             
-            # If we used a proactive greeting, mark relevant events as followed up
-            if greeting:
-                # Extract event type from greeting to mark as followed up
-                for event_type in ['exam', 'interview', 'appointment']:
-                    if event_type in greeting.lower():
-                        event_manager.mark_event_followed_up(email, event_type)
-                        break
+            # Mark events as followed up if proactive greeting was used
+            if greeting and pending_events:
+                event_manager.mark_event_followed_up(pending_events, email)
             
-            # Save successful interaction using add_chat_pair
+            # Save interaction
             firebase_manager.add_chat_pair(
                 email=email,
                 user_message=message,
                 model_response=bot_message,
                 emotion_detected=emotion,
-                urgency_level=urgency_level,
-                suggestions=suggestions,
-                follow_up_questions=follow_up_questions
+                urgency_level=urgency_level
             )
+            
+            return bot_message
+            
+        except Exception as e:
+            try:
+                # Use crisis manager for error handling
+                user_profile = firebase_manager.get_user_profile(email)
+                user_name = user_profile.name
+                emotion, urgency_level = helper_manager.detect_emotion(message)
+                return crisis_manager.handle_error_response(message, emotion, urgency_level, user_name).content
+            except:
+                return f"Sorry, I'm having technical difficulties. Please try again later. Error: {e}"
+
+    async def chat(self, email: str, message: str) -> LLMMessage:
+        """Async chat method that wraps the unified conversation processor."""
+        # Get user data for LLMMessage format
+        emotion, urgency_level = helper_manager.detect_emotion(message)
+        user_profile = firebase_manager.get_user_profile(email)
+        
+        try:
+            # Use the unified processor for core logic
+            bot_message = self.process_conversation(email, message)
+            
+            # Generate follow-up questions and suggestions
+            try:
+                follow_up_questions, suggestions = helper_manager.generate_questions_and_suggestions(
+                    emotion, urgency_level, user_profile.name, email, message
+                )
+            except:
+                follow_up_questions = []
+                suggestions = []
             
             return LLMMessage(
                 content=bot_message,
@@ -259,23 +263,19 @@ class MentalHealthChatbot:
             
         except Exception as e:
             # Generate contextual error message using LLM
-            error_message = crisis_manager.generate_error_response(message, emotion, urgency_level, user_profile.name)
-            error_suggestions = crisis_manager.generate_error_suggestions(message, emotion)
-            error_questions = crisis_manager.generate_error_follow_up_questions(user_profile.name)
-            
-            # Save error interaction using add_chat_pair
-            firebase_manager.add_chat_pair(
-                email=email,
-                user_message=message,
-                model_response=error_message,
-                emotion_detected=emotion,
-                urgency_level=urgency_level,
-                suggestions=error_suggestions,
-                follow_up_questions=error_questions
-            )
-            
-            return LLMMessage(
-                content=error_message,
-                suggestions=error_suggestions,
-                follow_up_questions=error_questions
-            )
+            try:
+                error_message = crisis_manager.generate_error_response(message, emotion, urgency_level, user_profile.name)
+                error_suggestions = crisis_manager.generate_error_suggestions(message, emotion)
+                error_questions = crisis_manager.generate_error_follow_up_questions(user_profile.name)
+                
+                return LLMMessage(
+                    content=error_message,
+                    suggestions=error_suggestions,
+                    follow_up_questions=error_questions
+                )
+            except:
+                return LLMMessage(
+                    content=f"Sorry, I'm having technical difficulties. Please try again later.",
+                    suggestions=[],
+                    follow_up_questions=[]
+                )

@@ -3,9 +3,7 @@ Summary Manager for Daily Conversation Summaries
 Handles generation, storage, and retrieval of conversation summaries
 """
 
-import os
-from datetime import datetime, date
-from typing import List, Dict, Any, Optional
+from typing import List, Optional
 import firebase_admin
 from firebase_admin import firestore
 from langchain_google_genai import ChatGoogleGenerativeAI

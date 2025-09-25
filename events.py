@@ -30,8 +30,8 @@ class EventManager:
         )
         self.db = firebase_manager.db 
     
-    def add_important_event(self, email: str, event: Event):
-        """Add an important event to Firestore using subcollection."""
+    def add_event(self, email: str, event: Event):
+        """Add an event to Firestore using subcollection."""
         if not self.db:
             return
         
@@ -77,7 +77,7 @@ class EventManager:
         return []
 
     def _extract_events_with_llm(self, message: str, email: str) -> Optional[Event]:
-        """Use LLM to extract important events and timing from user messages."""
+        """Use LLM to extract events and timing from user messages."""
         today = datetime.now()
         tomorrow = today + timedelta(days=1)
         yesterday = today - timedelta(days=1)
@@ -160,7 +160,7 @@ class EventManager:
         except Exception as e:
             return None
 
-    def _generate_event_greeting_with_llm(self, events: List[Event], email: str) -> str:
+    def _generate_event_greeting(self, events: List[Event], email: str) -> str:
         """Generate a personalized event greeting using LLM for multiple events."""
         user_profile = firebase_manager.get_user_profile(email)
         name = user_profile.name
@@ -210,7 +210,7 @@ class EventManager:
             return greeting
             
         except Exception as e:
-            return f"Hey {name}! How are your events going?"
+            pass
 
     def delete_events(self, events: List[Event], email: str) -> None:
         """Delete events from the database."""
