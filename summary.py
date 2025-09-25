@@ -77,11 +77,12 @@ class SummaryManager:
             print(f"ERROR: Error getting daily summary: {e}")
             return None
     
-    def generate_conversation_summary(self, message_pairs: List[MessagePair]) -> Optional[str]:
+    def generate_conversation_summary(self, message_pairs: List[MessagePair]) -> str:
         """Generate AI summary of a conversation using LLM."""
-        if not message_pairs:
-            return None
         
+        if not message_pairs:
+            return "No conversation data available for summary."
+
         # Build conversation text from MessagePair objects
         conversation_text = ""
         

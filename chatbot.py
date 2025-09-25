@@ -13,6 +13,7 @@ from summary import summary_manager
 from events import event_manager
 from crisis import crisis_manager
 from helper import helper_manager
+from daily import daily_task_manager, generate_event_greeting, get_user_daily_context
 
 
 
@@ -113,10 +114,7 @@ class MentalHealthChatbot:
             summary_manager.generate_conversation_summary(email)
             
             # Check for pending events and generate proactive greeting
-            pending_events = event_manager.get_events(email)
-            greeting = None
-            if pending_events:
-                greeting = event_manager._generate_event_greeting(pending_events, email)
+            greeting = generate_event_greeting(email)
             
             # Check if message is mental health related
             topic_filter = self.health_filter.filter(message)
@@ -145,6 +143,9 @@ class MentalHealthChatbot:
             recent_messages = self.message_manager.get_conversation(email, limit=20)
             conversation_depth = len(recent_messages) if recent_messages else 0
             
+            # Get daily context for enhanced conversation
+            daily_context = get_user_daily_context(email)
+            
             # Handle crisis situations
             if urgency_level >= 5:
                 crisis_response = crisis_manager.handle_crisis_situation(message, user_name)
@@ -165,6 +166,8 @@ class MentalHealthChatbot:
 
             CONVERSATION CONTEXT:
             {context}
+
+            {daily_context}
 
             {f"PROACTIVE GREETING: You should start your response with this caring follow-up: '{greeting}'" if greeting else ""}
 
@@ -212,8 +215,10 @@ class MentalHealthChatbot:
                 suggestions = []
             
             # Mark events as followed up if proactive greeting was used
-            if greeting and pending_events:
-                event_manager.mark_event_followed_up(pending_events, email)
+            if greeting:
+                pending_events = event_manager.get_events(email)
+                if pending_events:
+                    event_manager.mark_event_followed_up(pending_events, email)
             
             # Save interaction
             firebase_manager.add_chat_pair(
@@ -236,15 +241,15 @@ class MentalHealthChatbot:
             except:
                 return f"Sorry, I'm having technical difficulties. Please try again later. Error: {e}"
 
-    async def chat(self, email: str, message: str) -> LLMMessage:
-        """Async chat method that wraps the unified conversation processor."""
-        # Get user data for LLMMessage format
-        emotion, urgency_level = helper_manager.detect_emotion(message)
-        user_profile = firebase_manager.get_user_profile(email)
-        
+    def chat(self, email: str, message: str) -> dict:
+        """Chat method that processes conversation and saves to Firebase."""
         try:
             # Use the unified processor for core logic
             bot_message = self.process_conversation(email, message)
+            
+            # Get user data for additional processing
+            emotion, urgency_level = helper_manager.detect_emotion(message)
+            user_profile = firebase_manager.get_user_profile(email)
             
             # Generate follow-up questions and suggestions
             try:
@@ -255,27 +260,70 @@ class MentalHealthChatbot:
                 follow_up_questions = []
                 suggestions = []
             
-            return LLMMessage(
-                content=bot_message,
+            # Save the complete interaction to Firebase with all data
+            firebase_manager.add_chat_pair(
+                email=email,
+                user_message=message,
+                model_response=bot_message,
+                emotion_detected=emotion,
+                urgency_level=urgency_level,
                 suggestions=suggestions,
                 follow_up_questions=follow_up_questions
             )
             
+            return {"message": "SUCCESS"}
+            
         except Exception as e:
-            # Generate contextual error message using LLM
             try:
+                # Generate contextual error message using LLM
+                emotion, urgency_level = helper_manager.detect_emotion(message)
+                user_profile = firebase_manager.get_user_profile(email)
+                
                 error_message = crisis_manager.generate_error_response(message, emotion, urgency_level, user_profile.name)
                 error_suggestions = crisis_manager.generate_error_suggestions(message, emotion)
                 error_questions = crisis_manager.generate_error_follow_up_questions(user_profile.name)
                 
-                return LLMMessage(
-                    content=error_message,
+                # Save error interaction to Firebase
+                firebase_manager.add_chat_pair(
+                    email=email,
+                    user_message=message,
+                    model_response=error_message,
+                    emotion_detected=emotion,
+                    urgency_level=urgency_level,
                     suggestions=error_suggestions,
                     follow_up_questions=error_questions
                 )
+                
+                return {"message": "SUCCESS"}
+                
             except:
-                return LLMMessage(
-                    content=f"Sorry, I'm having technical difficulties. Please try again later.",
-                    suggestions=[],
-                    follow_up_questions=[]
+                # Save basic error response
+                error_message = "Sorry, I'm having technical difficulties. Please try again later."
+                self.message_manager.add_chat_pair(
+                    email=email,
+                    user_message=message,
+                    model_response=error_message,
+                    emotion_detected="neutral",
+                    urgency_level=1
                 )
+                
+                return {"message": "SUCCESS"}
+
+    def process_user_daily_tasks(self, email: str) -> dict:
+        """Process daily tasks for a specific user."""
+        try:
+            results = daily_task_manager.process_daily_tasks(email)
+            return {"message": "SUCCESS", "tasks_completed": results}
+        except Exception as e:
+            print(f"ERROR: Failed to process daily tasks for {email}: {e}")
+            return {"message": "ERROR", "error": str(e)}
+
+    def get_user_daily_stats(self, email: str) -> dict:
+        """Get daily statistics for a user."""
+        try:
+            from daily import get_daily_stats
+            stats = get_daily_stats(email)
+            return {"message": "SUCCESS", "stats": stats}
+        except Exception as e:
+            print(f"ERROR: Failed to get daily stats for {email}: {e}")
+            return {"message": "ERROR", "error": str(e)}
