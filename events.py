@@ -5,23 +5,19 @@ Handles detection, storage, and follow-up of important events in conversations
 
 import json
 from datetime import date, timedelta, datetime
-from typing import Optional, List, Dict, Any
+from typing import Optional, List
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import SystemMessage, HumanMessage
-from firebase_admin import firestore
-from google.cloud.firestore import FieldFilter
 from data import Event
-from config import config
-from firebase_manager import firebase_manager
-from summary import summary_manager
 import hashlib
 from datetime import datetime
+import logging
 
 
 class EventManager:
     """Manages event detection, storage, and proactive follow-ups."""
     
-    def __init__(self):
+    def __init__(self,config,firebase_manager):
         """Initialize the EventManager with LLM for event detection."""
         self.llm = ChatGoogleGenerativeAI(
             model=config.model_name,
@@ -41,7 +37,7 @@ class EventManager:
             doc_ref.set(event_data)
             
         except Exception as e:
-            print(f"ERROR: Error adding event: {e}")
+            logging.error(f"Error adding event: {e}")
     
     def get_events(self, email: str) -> List[Event]:
         """Get all events for user."""
@@ -66,13 +62,13 @@ class EventManager:
                     )
                     all_events.append(event)
                 except Exception as parse_error:
-                    print(f"Warning: Could not parse event {doc.id}: {parse_error}")
+                    logging.warning(f"Could not parse event {doc.id}: {parse_error}")
                     continue
             
             return all_events
             
         except Exception as e:
-            print(f"ERROR: Error getting events: {e}")
+            logging.error(f"Error getting events: {e}")
         
         return []
 
@@ -160,7 +156,7 @@ class EventManager:
         except Exception as e:
             return None
 
-    def _generate_event_greeting(self, events: List[Event], email: str) -> str:
+    def _generate_event_greeting(self, events: List[Event], email: str,firebase_manager) -> str:
         """Generate a personalized event greeting using LLM for multiple events."""
         user_profile = firebase_manager.get_user_profile(email)
         name = user_profile.name
@@ -228,6 +224,4 @@ class EventManager:
                     event_ref.delete()  
                     
             except Exception as e:
-                print(f"ERROR: Error processing event {event.eventid}: {e}")
-
-event_manager = EventManager()
+                logging.error(f"Error processing event {event.eventid}: {e}")

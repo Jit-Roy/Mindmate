@@ -5,27 +5,35 @@ from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from data import MessagePair, UserMessage, LLMMessage
 from message import MessageManager
 from filter import MentalHealthFilter
-from config import config
-from firebase_manager import firebase_manager
-from summary import summary_manager
-from events import event_manager
-from crisis import crisis_manager
-from helper import helper_manager
-from daily import daily_task_manager
+from config import Config
+from firebase_manager import FirebaseManager
+from summary import SummaryManager
+from events import EventManager
+from crisis import CrisisManager
+from helper import HelperManager
+from daily import DailyTaskManager
 
 
 class MentalHealthChatbot:
     """Main chatbot class that orchestrates the mental health conversation."""
     
     def __init__(self):
+        self.firebase_manager = FirebaseManager()
+        self.config = Config()
         self.llm = ChatGoogleGenerativeAI(
-            model=config.model_name,
-            google_api_key=config.gemini_api_key,
-            temperature=config.temperature,
-            max_tokens=config.max_tokens
+            model=self.config.model_name,
+            google_api_key=self.config.gemini_api_key,
+            temperature=self.config.temperature,
+            max_tokens=self.config.max_tokens
         )
-        self.message_manager = MessageManager()
-        self.health_filter = MentalHealthFilter()
+
+        self.message_manager = MessageManager(self.firebase_manager)
+        self.health_filter = MentalHealthFilter(self.config)
+        self.event_manager = EventManager(self.config,self.firebase_manager)
+        self.crisis_manager = CrisisManager(self.config)
+        self.helper_manager = HelperManager(self.config)
+        self.summary_manager = SummaryManager(self.config)
+        self.daily_task_manager = DailyTaskManager(self.config)
         
         self.system_prompt = """You are MyBro - a caring, supportive friend who adapts your response style based on what the person needs. Your personality adjusts to match the situation:
 
@@ -104,12 +112,12 @@ class MentalHealthChatbot:
     def process_conversation(self, email: str, message: str) -> str:
         """Unified conversation processing method for both sync and async usage."""
         # Get user profile and generate conversation summary
-        user_profile = firebase_manager.get_user_profile(email)
+        user_profile = self.firebase_manager.get_user_profile(email)
         user_name = user_profile.name
         
         # Check if message is mental health related
         topic_filter = self.health_filter.filter(message)
-        emotion, urgency_level = helper_manager.detect_emotion(message)
+        emotion, urgency_level = self.helper_manager.detect_emotion(message)
         
         if not topic_filter.is_mental_health_related:
             redirect_response = "Sorry but i can not answer to that question!!!."
@@ -125,16 +133,16 @@ class MentalHealthChatbot:
             return redirect_response
         
         # Detect and store important events
-        event = event_manager._extract_events_with_llm(message, email)
+        event = self.event_manager._extract_events_with_llm(message, email)
         if event:
-            event_manager.add_event(email, event)
+            self.event_manager.add_event(email, event)
         
         # Get conversation context
-        recent_messages = self.message_manager.get_conversation(email, limit=20)
+        recent_messages = self.message_manager.get_conversation(email, self.firebase_manager,limit=20)
         
         # Handle crisis situations
         if urgency_level >= 5:
-            crisis_response = crisis_manager.handle_crisis_situation(message, user_name)
+            crisis_response = self.crisis_manager.handle_crisis_situation(message, user_name)
 
             self.message_manager.add_chat_pair(
                 email=email,

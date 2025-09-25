@@ -7,13 +7,12 @@ from typing import List
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import SystemMessage, HumanMessage
 from data import LLMMessage
-from config import config
 
 
 class CrisisManager:
     """Manages crisis intervention and error handling responses."""
     
-    def __init__(self):
+    def __init__(self,config):
         """Initialize the CrisisManager with LLM for response generation."""
         self.llm = ChatGoogleGenerativeAI(
             model=config.model_name,
@@ -277,7 +276,3 @@ Listen to me: You're in crisis right now, and that's okay - it happens to the st
                 f"What's really on your heart right now, {name}?",
                 "How can I best support you today?"
             ]
-
-
-# Global crisis manager instance
-crisis_manager = CrisisManager()
