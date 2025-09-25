@@ -107,9 +107,6 @@ class MentalHealthChatbot:
         user_profile = firebase_manager.get_user_profile(email)
         user_name = user_profile.name
         
-        # Check for pending events and generate greeting
-        greeting, _ = daily_task_manager.daily_task(email)
-        
         # Check if message is mental health related
         topic_filter = self.health_filter.filter(message)
         emotion, urgency_level = helper_manager.detect_emotion(message)
@@ -154,8 +151,6 @@ class MentalHealthChatbot:
         {self.system_prompt}
         CONVERSATION CONTEXT:
         {recent_messages}
-
-        {f"PROACTIVE GREETING: You should start your response with this caring follow-up: '{greeting}'" if greeting else ""}
 
         CURRENT USER STATE:
         - Detected emotion: {emotion}
