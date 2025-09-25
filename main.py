@@ -1,3 +1,4 @@
+import email
 import sys
 import os
 sys.path.append(os.getcwd())
@@ -22,7 +23,9 @@ def android_chat(user_prompt, user_email="arientific@gmail.com"):
         user_profile = firebase_manager.get_user_profile(user_email)
         user_name = user_profile.name 
         summary_manager.generate_conversation_summary(user_email)
-        proactive_greeting = event_manager.generate_proactive_greeting(user_email)
+        pending_events = event_manager.get_pending_events(user_email)
+        if pending_events:
+            greeting = event_manager._generate_event_greeting_with_llm(pending_events, user_email)
         topic_filter = chatbot.health_filter.filter(user_prompt)
         emotion, urgency_level = helper_manager.detect_emotion(user_prompt)
         
@@ -39,8 +42,9 @@ def android_chat(user_prompt, user_email="arientific@gmail.com"):
             
             return redirect_response
 
-
-        event_manager.detect_important_events(user_prompt, user_email)
+        event = event_manager._extract_events_with_llm(user_prompt, user_email)
+        if event:
+            event_manager.add_important_event(user_email, event)
         context = message_manager.get_conversation_context(user_email)
         recent_messages = message_manager.get_conversation(user_email, limit=20)
         conversation_depth = len(recent_messages) if recent_messages else 0
@@ -64,7 +68,7 @@ def android_chat(user_prompt, user_email="arientific@gmail.com"):
         CONVERSATION CONTEXT:
         {context}
 
-        {f"PROACTIVE GREETING: You should start your response with this caring follow-up: '{proactive_greeting}'" if proactive_greeting else ""}
+        {f"PROACTIVE GREETING: You should start your response with this caring follow-up: '{greeting}'" if greeting else ""}
 
         CURRENT USER STATE:
         - Detected emotion: {emotion}
@@ -107,9 +111,9 @@ def android_chat(user_prompt, user_email="arientific@gmail.com"):
             suggestions = []
         
         # Step 13: Mark events as followed up if proactive greeting was used
-        if proactive_greeting:
+        if greeting:
             for event_type in ['exam', 'interview', 'appointment']:
-                if event_type in proactive_greeting.lower():
+                if event_type in greeting.lower():
                     event_manager.mark_event_followed_up(user_email, event_type)
                     break
         

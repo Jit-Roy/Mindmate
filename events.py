@@ -43,16 +43,15 @@ class EventManager:
         except Exception as e:
             print(f"ERROR: Error adding event: {e}")
     
-    def get_pending_events(self, email: str) -> List[Event]:
-        """Get events that need follow-up for user."""
+    def get_events(self, email: str) -> List[Event]:
+        """Get all events for user."""
         if not self.db:
             return []
         
         try:
-            events_ref = self.db.collection('users').document(email).collection('events')
-            events = events_ref.where(filter=FieldFilter('isCompleted', '==', False)).stream()
+            events = self.db.collection('users').document(email).collection('events').stream()
             
-            pending_events = []
+            all_events = []
             for doc in events:
                 event_data = doc.to_dict()
                 
@@ -65,25 +64,17 @@ class EventManager:
                         mentionedAt=event_data.get('mentionedAt', ''),
                         isCompleted=event_data.get('isCompleted', False)
                     )
-                    pending_events.append(event)
+                    all_events.append(event)
                 except Exception as parse_error:
                     print(f"Warning: Could not parse event {doc.id}: {parse_error}")
                     continue
             
-            return pending_events
+            return all_events
             
         except Exception as e:
-            print(f"ERROR: Error getting pending events: {e}")
+            print(f"ERROR: Error getting events: {e}")
         
         return []
-    
-    def detect_important_events(self, message: str, email: str) -> None:
-        """Detect and store important upcoming events from user messages using LLM."""
-        
-        event = self._extract_events_with_llm(message, email)
-        
-        if event:
-            self.add_important_event(email, event)
 
     def _extract_events_with_llm(self, message: str, email: str) -> Optional[Event]:
         """Use LLM to extract important events and timing from user messages."""
@@ -169,17 +160,6 @@ class EventManager:
         except Exception as e:
             return None
 
-    def generate_proactive_greeting(self, email: str) -> Optional[str]:
-        """Generate a personalized proactive greeting using LLM for important events."""
-        pending_events = self.get_pending_events(email)
-        
-        if not pending_events:
-            return None
-        
-        greeting = self._generate_event_greeting_with_llm(pending_events, email)
-        
-        return greeting
-
     def _generate_event_greeting_with_llm(self, events: List[Event], email: str) -> str:
         """Generate a personalized event greeting using LLM for multiple events."""
         user_profile = firebase_manager.get_user_profile(email)
@@ -232,86 +212,22 @@ class EventManager:
         except Exception as e:
             return f"Hey {name}! How are your events going?"
 
-    def mark_event_followed_up(self, email: str, event_id: str) -> None:
-        """Mark a specific event as followed up using its unique ID."""
+    def delete_events(self, events: List[Event], email: str) -> None:
+        """Delete events from the database."""
         if not self.db:
             return
         
-        try:
-            event_ref = self.db.collection('users').document(email).collection('events').document(event_id)
-            event_doc = event_ref.get()
-            
-            if event_doc.exists:
-                # Mark this specific event as followed up
-                event_ref.update({'isCompleted': True})
-                event_data = event_doc.to_dict()
-                print(f"SUCCESS: Marked event as followed up - ID: {event_id}, Type: {event_data.get('eventType', 'Unknown')}")
-            else:
-                print(f"WARNING: Event not found with ID: {event_id}")
-            
-        except Exception as e:
-            print(f"ERROR: Error marking event as followed up: {e}")
-    
-    def get_event_by_id(self, email: str, event_id: str) -> Optional[Event]:
-        """Get a specific event by its ID."""
-        if not self.db:
-            return None
+        today = date.today()
         
-        try:
-            event_ref = self.db.collection('users').document(email).collection('events').document(event_id)
-            event_doc = event_ref.get()
-            
-            if event_doc.exists:
-                event_data = event_doc.to_dict()
-                return Event(
-                    eventid=event_id,
-                    eventType=event_data.get('eventType', ''),
-                    description=event_data.get('description', ''),
-                    eventDate=event_data.get('eventDate'),
-                    mentionedAt=event_data.get('mentionedAt', ''),
-                    isCompleted=event_data.get('isCompleted', False)
-                )
-            return None
-            
-        except Exception as e:
-            print(f"ERROR: Error getting event by ID: {e}")
-            return None
-    
-    def list_user_events(self, email: str, include_completed: bool = True) -> List[Event]:
-        """List all events for a user with their IDs."""
-        if not self.db:
-            return []
-        
-        try:
-            events_ref = self.db.collection('users').document(email).collection('events')
-            
-            if not include_completed:
-                events = events_ref.where(filter=FieldFilter('isCompleted', '==', False)).stream()
-            else:
-                events = events_ref.stream()
-            
-            user_events = []
-            for doc in events:
-                event_data = doc.to_dict()
+        for event in events:
+            try:
+                event_date = datetime.strptime(event.eventDate, '%Y-%m-%d').date()
                 
-                try:
-                    event = Event(
-                        eventid=doc.id,  # This is our generated ID
-                        eventType=event_data.get('eventType', ''),
-                        description=event_data.get('description', ''),
-                        eventDate=event_data.get('eventDate'),
-                        mentionedAt=event_data.get('mentionedAt', ''),
-                        isCompleted=event_data.get('isCompleted', False)
-                    )
-                    user_events.append(event)
-                except Exception as parse_error:
-                    print(f"Warning: Could not parse event {doc.id}: {parse_error}")
-                    continue
-            
-            return user_events
-            
-        except Exception as e:
-            print(f"ERROR: Error listing user events: {e}")
-            return []
+                if event_date < today:
+                    event_ref = self.db.collection('users').document(email).collection('events').document(event.eventid)
+                    event_ref.delete()  
+                    
+            except Exception as e:
+                print(f"ERROR: Error processing event {event.eventid}: {e}")
 
 event_manager = EventManager()

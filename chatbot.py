@@ -108,7 +108,10 @@ class MentalHealthChatbot:
         """Main chat method that processes user input and generates response."""
         
         # Check if we should generate a proactive greeting first
-        proactive_greeting = event_manager.generate_proactive_greeting(email)
+        pending_events = event_manager.get_pending_events(email)
+        
+        if pending_events:
+            greeting = event_manager._generate_event_greeting_with_llm(pending_events, email)
         
         # Check if message is mental health related
         topic_filter = self.health_filter.filter(message)
@@ -144,7 +147,9 @@ class MentalHealthChatbot:
         emotion, urgency_level = helper_manager.detect_emotion(message)
         
         # Detect and store important events
-        event_manager.detect_important_events(message, email)
+        event = event_manager._extract_events_with_llm(message, email)
+        if event:
+            event_manager.add_important_event(email, event)
         
         # Get conversation context BEFORE adding the current message
         recent_messages = self.message_manager.get_conversation(email, limit=20)
@@ -178,7 +183,7 @@ class MentalHealthChatbot:
         - Age: {user_profile.age or 'Not specified'}
         - Gender: {user_profile.gender or 'Not specified'}
 
-        {f"PROACTIVE GREETING: You should start your response with this caring follow-up: '{proactive_greeting}'" if proactive_greeting else ""}
+        {f"PROACTIVE GREETING: You should start your response with this caring follow-up: '{greeting}'" if greeting else ""}
 
         CURRENT USER STATE:
         - Detected emotion: {emotion}
@@ -228,10 +233,10 @@ class MentalHealthChatbot:
             )
             
             # If we used a proactive greeting, mark relevant events as followed up
-            if proactive_greeting:
+            if greeting:
                 # Extract event type from greeting to mark as followed up
                 for event_type in ['exam', 'interview', 'appointment']:
-                    if event_type in proactive_greeting.lower():
+                    if event_type in greeting.lower():
                         event_manager.mark_event_followed_up(email, event_type)
                         break
             
