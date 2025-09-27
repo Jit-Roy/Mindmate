@@ -64,6 +64,7 @@ from message import MessageManager
 from summary import SummaryManager
 import logging
 
+
 def run_daily_task_for_user(email: str) -> tuple[str, str]:
     
     
@@ -80,11 +81,11 @@ def run_daily_task_for_user(email: str) -> tuple[str, str]:
     try:
         
         events = event_manager.get_events(email)
-        greeting = event_manager._generate_event_greeting(events, email, firebase_manager)
+        #greeting = event_manager._generate_event_greeting(events, email, firebase_manager)
         event_manager.delete_events(events, email)
 
-        
-        notification = message_manager.generate_notification_text(email, config, firebase_manager)
+        # no need for notification in daily task
+        # notification = message_manager.generate_notification_text(email, config, firebase_manager)
 
         
         today_iso = date.today().isoformat()
@@ -112,7 +113,8 @@ def run_daily_task_for_user(email: str) -> tuple[str, str]:
                         email, today_iso, {"summary_text": conversation_summary}
                     )
 
-        return greeting, notification
+        # no need return
+        #return greeting, notification
 
     except Exception as e:
         logging.error(f"Error executing daily task for {email}: {e}", exc_info=True)

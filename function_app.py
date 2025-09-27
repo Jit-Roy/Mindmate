@@ -149,8 +149,8 @@ def daily_task_timer(timer: func.TimerRequest) -> None:
         
         for email in all_user_emails:
             try:
-                greeting, notification = run_daily_task_for_user(email)
-                logging.info(f"Daily task completed for {email}: Greeting - {greeting}, Notification - {notification}")
+                run_daily_task_for_user(email)
+                logging.info(f"Daily task completed for {email}")
             except Exception as e:
                 logging.error(f"Error processing daily task for {email}: {e}", exc_info=True)
     except Exception as e:
