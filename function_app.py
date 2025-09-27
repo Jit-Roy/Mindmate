@@ -6,6 +6,8 @@ import asyncio
 from daily import run_daily_task_for_user
 
 from firebase_manager import FirebaseManager
+from daily import send_notification
+from daily import run_daily_task_for_user
 
 from main import android_chat
 
@@ -74,8 +76,8 @@ def chat_handler(req: func.HttpRequest) -> func.HttpResponse:
         
         
         
-@app.route(route="dailytask", auth_level=func.AuthLevel.FUNCTION)
-def daily_task_handler(req: func.HttpRequest) -> func.HttpResponse:
+@app.route(route="notification", auth_level=func.AuthLevel.FUNCTION)
+def notification_handeler(req: func.HttpRequest) -> func.HttpResponse:
     
     logging.info('Daily Task HTTP handler received a request.')
 
@@ -101,10 +103,10 @@ def daily_task_handler(req: func.HttpRequest) -> func.HttpResponse:
         
         # config = Config()
         # task_manager = DailyTaskManager(config)
-        greeting, notification = run_daily_task_for_user(email)
+        notification = send_notification(email)
 
         response_data = {
-            "greeting": greeting,
+            #"greeting": greeting,
             "notification": notification,
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
@@ -124,18 +126,15 @@ def daily_task_handler(req: func.HttpRequest) -> func.HttpResponse:
         )
 
 @app.function_name(name="DailyTaskTimer")
-@app.timer_trigger(schedule="0 0 */5 * * *",  
+@app.timer_trigger(schedule="0 0 */24 * * *",  
                    arg_name="timer",
                    run_on_startup=False)
 def daily_task_timer(timer: func.TimerRequest) -> None:
     
     if timer.past_due:
         logging.info('The timer is past due!')
-
     logging.info('Daily Task Timer function is executing.')
-    
-    
-    
+
     try:
         
         firebase_manager = FirebaseManager()

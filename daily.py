@@ -63,9 +63,10 @@ from events import EventManager
 from message import MessageManager
 from summary import SummaryManager
 import logging
+from typing import Union, Tuple
 
 
-def run_daily_task_for_user(email: str) -> tuple[str, str]:
+def run_daily_task_for_user(email: str) -> None:
     
     
     try:
@@ -80,9 +81,9 @@ def run_daily_task_for_user(email: str) -> tuple[str, str]:
 
     try:
         
-        events = event_manager.get_events(email)
+        #events = event_manager.get_events(email)
         #greeting = event_manager._generate_event_greeting(events, email, firebase_manager)
-        event_manager.delete_events(events, email)
+        #event_manager.delete_events(events, email)
 
         # no need for notification in daily task
         # notification = message_manager.generate_notification_text(email, config, firebase_manager)
@@ -118,6 +119,30 @@ def run_daily_task_for_user(email: str) -> tuple[str, str]:
 
     except Exception as e:
         logging.error(f"Error executing daily task for {email}: {e}", exc_info=True)
+        #return "Error during task execution.", "Could not generate notification."
+    
+    
+
+def send_notification(email: str) -> Union[str, Tuple[str, str]]:
+    try:
+        config = Config()
+        firebase_manager = FirebaseManager()
+        event_manager = EventManager(config, firebase_manager)
+        message_manager = MessageManager(firebase_manager)
+        summary_manager = SummaryManager(config, firebase_manager.db)
+    except Exception as e:
+        logging.error(f"Error initializing components for {email}: {e}", exc_info=True)
+        return "Error: Could not initialize components.", "Error: Initialization failed."
+
+    try:
+        notification = message_manager.generate_notification_text(email, config, firebase_manager)
+        return notification
+
+    except Exception as e:
+        logging.error(f"Error executing daily task for {email}: {e}", exc_info=True)
         return "Error during task execution.", "Could not generate notification."
+    
+    
+#print(send_notification("royjit0506@gmail.com"))
     
     
