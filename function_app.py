@@ -49,8 +49,6 @@ def chat_handler(req: func.HttpRequest) -> func.HttpResponse:
                 json.dumps({"error": "Please provide 'email' and 'message'."}),
                 status_code=400, mimetype="application/json", headers=CORS_HEADERS
             )
-
-        
         
         chat_response = android_chat(user_prompt=message, user_email=email)
 
@@ -79,7 +77,7 @@ def chat_handler(req: func.HttpRequest) -> func.HttpResponse:
 @app.route(route="notification", auth_level=func.AuthLevel.FUNCTION)
 def notification_handeler(req: func.HttpRequest) -> func.HttpResponse:
     
-    logging.info('Daily Task HTTP handler received a request.')
+    logging.info('Notification HTTP handler received a request.')
 
     if req.method == "OPTIONS":
         return func.HttpResponse("", status_code=204, headers=CORS_HEADERS)
@@ -89,24 +87,22 @@ def notification_handeler(req: func.HttpRequest) -> func.HttpResponse:
             req_body = req.get_json()
             email = req_body.get('email')
         except ValueError:
+            logging.error("Invalid JSON format.")
             return func.HttpResponse(
                 json.dumps({"error": "Invalid JSON format."}),
                 status_code=400, mimetype="application/json", headers=CORS_HEADERS
             )
 
         if not email:
+            logging.error("Email not provided in the request body.")
             return func.HttpResponse(
                 json.dumps({"error": "Please provide an 'email' in the request body."}),
                 status_code=400, mimetype="application/json", headers=CORS_HEADERS
             )
         
-        
-        # config = Config()
-        # task_manager = DailyTaskManager(config)
         notification = send_notification(email)
 
         response_data = {
-            #"greeting": greeting,
             "notification": notification,
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
@@ -136,9 +132,7 @@ def daily_task_timer(timer: func.TimerRequest) -> None:
     logging.info('Daily Task Timer function is executing.')
 
     try:
-        
         firebase_manager = FirebaseManager()
-        
         all_user_emails = firebase_manager.get_all_user_emails()
         
         

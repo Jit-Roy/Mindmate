@@ -222,10 +222,7 @@ class MessageManager:
                     
                     hours_since_last = (now - last_message_time).total_seconds() / 3600
                     days_since_last = hours_since_last / 24
-                    
-                    # Don't send notification if too recent
-                    if hours_since_last < 6:  
-                        return ""
+                
                     
                     # Determine which conversation to use based on when the last message was
                     last_message_date = last_message_time.date()
