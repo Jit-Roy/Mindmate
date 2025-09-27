@@ -1,13 +1,13 @@
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage
 from data import MentalHealthTopicFilter
-from config import config
+
 
 
 class MentalHealthFilter:
     """Filter to ensure conversations stay focused on mental health topics."""
     
-    def __init__(self):
+    def __init__(self,config):
         self.llm = ChatGoogleGenerativeAI(
             model=config.model_name,
             google_api_key=config.gemini_api_key,

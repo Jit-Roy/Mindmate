@@ -8,14 +8,14 @@ import firebase_admin
 from firebase_admin import firestore
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import SystemMessage, HumanMessage
-from config import config
 from data import MessagePair, UserMessage, LLMMessage, ConversationMemory
+import logging
 
 
 class SummaryManager:
     """Manages conversation summaries and daily summary generation."""
     
-    def __init__(self, db=None):
+    def __init__(self, config,db=None):
         """Initialize with optional database connection."""
         self.db = db
         if not self.db:
@@ -23,9 +23,9 @@ class SummaryManager:
                 if firebase_admin._apps:
                     self.db = firestore.client()
                 else:
-                    print("WARNING: Firebase not initialized for SummaryManager")
+                    logging.warning("Firebase not initialized for SummaryManager")
             except Exception as e:
-                print(f"ERROR: Could not initialize Firebase in SummaryManager: {e}")
+                logging.error(f"Could not initialize Firebase in SummaryManager: {e}")
                 self.db = None
         
         self.llm = ChatGoogleGenerativeAI(
@@ -45,7 +45,7 @@ class SummaryManager:
             return doc.exists
             
         except Exception as e:
-            print(f"ERROR: Error checking daily summary existence: {e}")
+            logging.error(f"Error checking daily summary existence: {e}")
             return False
     
     def store_daily_summary(self, email: str, date_str: str, summary: dict):
@@ -55,10 +55,10 @@ class SummaryManager:
         
         try:
             self.db.collection('users').document(email).collection('summaries').document(f'daily_{date_str}').set(summary)
-            print(f"SUCCESS: Stored daily summary for {email} on {date_str}")
+            logging.info(f"Stored daily summary for {email} on {date_str}")
             
         except Exception as e:
-            print(f"ERROR: Error storing daily summary: {e}")
+            logging.error(f"Error storing daily summary: {e}")
     
     def get_daily_summary(self, email: str, date_str: str) -> Optional[dict]:
         """Get daily summary for a specific date."""
@@ -74,7 +74,7 @@ class SummaryManager:
             return None
             
         except Exception as e:
-            print(f"ERROR: Error getting daily summary: {e}")
+            logging.error(f"Error getting daily summary: {e}")
             return None
     
     def generate_conversation_summary(self, message_pairs: List[MessagePair]) -> str:
@@ -130,7 +130,5 @@ class SummaryManager:
             return summary_text
             
         except Exception as e:
-            print(f"Warning: Could not generate summary: {e}")
+            logging.warning(f"Could not generate summary: {e}")
             return None
-
-summary_manager = SummaryManager()

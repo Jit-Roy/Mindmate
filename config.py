@@ -20,5 +20,3 @@ class Config(BaseModel):
     class Config:
         env_file = ".env"
 
-# Global config instance
-config = Config()

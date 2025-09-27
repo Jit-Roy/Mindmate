@@ -9,6 +9,9 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 from google.cloud.firestore import FieldFilter
 from data import UserProfile
+import logging
+
+FIREBASE_JSON_PATH = os.environ.get("FIREBASE_JSON_PATH", "skatit-ec470-firebase-adminsdk-fbsvc-1b6d547ba7.json")
 
 class FirebaseManager:
     """Firebase manager with email-based user organization using Firestore."""
@@ -22,24 +25,24 @@ class FirebaseManager:
         try:
             if not firebase_admin._apps:
                 if self._use_service_account_file():
-                    print("SUCCESS: Firebase initialized with service account file!")
+                    logging.info("SUCCESS: Firebase initialized with service account file!")
                 else:
                     raise Exception("No valid Firebase credentials found")
             
             self.db = firestore.client()
             
         except Exception as e:
-            print(f"ERROR: Firebase initialization failed: {e}")
+            logging.error(f"Firebase initialization failed: {e}")
             self.db = None
     
     def _use_service_account_file(self):
         """Try to initialize Firebase using service account file."""
         try:
-            cred = credentials.Certificate("skatit-ec470-firebase-adminsdk-fbsvc-2d39f99bb7.json")
+            cred = credentials.Certificate(FIREBASE_JSON_PATH)
             firebase_admin.initialize_app(cred)
             return True
         except Exception as e:
-            print(f"Service account file failed: {e}")
+            logging.error(f"Service account file failed: {e}")
             return False
     
     def get_user_profile(self, email: str) -> UserProfile:
@@ -60,10 +63,36 @@ class FirebaseManager:
                         avatar=user_data.get('avatar')
                     )
             except Exception as e:
-                print(f"ERROR: Error getting user profile: {e}")
+                logging.error(f"Error getting user profile: {e}")
         
         return UserProfile(
             name="Unknown"
         )
 
-firebase_manager = FirebaseManager()
+
+    def get_all_user_emails(self) -> list[str]:
+                
+                if not self.db:
+                    logging.error("Cannot get user emails, Firestore is not initialized.")
+                    return []
+                
+                try:
+                    
+                    users_ref = self.db.collection('users')
+                    
+                    docs = users_ref.stream()
+                    
+                    
+                    email_list = [doc.id for doc in docs]
+                    
+                    logging.info(f"Found {len(email_list)} users to process.")
+                    return email_list
+                    
+                except Exception as e:
+                    logging.error(f"Failed to retrieve user emails: {e}")
+                    return []
+        
+        
+        
+#firebase_manager = FirebaseManager()
+#print(firebase_manager.get_all_user_emails())        
