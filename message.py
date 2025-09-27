@@ -66,10 +66,11 @@ class MessageManager:
     def get_conversation(self, email: str, firebase_manager,date: Optional[str] = None, limit: Optional[int] = None) -> List[MessagePair]:
         """
         Get conversation messages for a specific date with optional limit.
+        If no messages are available for the specified date (or today), falls back to the last conversation day.
         
         Args:
             email: User's email address
-            date: Date string in YYYYMMDD format. If None, uses today's date.
+            date: Date string in YYYYMMDD format. If None, uses today's date. If no messages are available for the specified date (or today), falls back to the last conversation day.
             limit: Maximum number of messages to return. If None, returns all messages. When limit is specified, returns the most recent messages first.
         
         Returns:
@@ -87,8 +88,19 @@ class MessageManager:
             doc_ref = firebase_manager.db.collection('users').document(email).collection('conversations').document(conversation_id)
             doc = doc_ref.get()
             
+            # If no conversation exists for the specified date, try to get last conversation
             if not doc.exists:
-                return []
+                last_conversation_time = self.get_last_conversation_time(email)
+                if last_conversation_time:
+                    last_date = last_conversation_time.strftime('%Y%m%d')
+                    conversation_id = f"conv_{last_date}"
+                    doc_ref = firebase_manager.db.collection('users').document(email).collection('conversations').document(conversation_id)
+                    doc = doc_ref.get()
+                    
+                    if not doc.exists:
+                        return []
+                else:
+                    return []
             
             chat_ref = doc_ref.collection('chat')
             
