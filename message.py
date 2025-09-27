@@ -11,6 +11,7 @@ class MessageManager:
     """Manages conversation memory, user profiles, and chat history using Firebase."""
     
     def __init__(self,firebase_manager):
+        #self.config = config
         self.conversations: Dict[str, ConversationMemory] = {}
         self.user_profiles: Dict[str, UserProfile] = {}
         self.db = firebase_manager.db
@@ -191,7 +192,7 @@ class MessageManager:
             logging.error(f"Error checking first chat of day: {e}")
             return False
 
-    def generate_notification_text(self, config,firebase_manager,email: str) -> str:
+    def generate_notification_text(self, email: str, config, firebase_manager) -> str:
         """Generate a short, comforting notification text based on recent activity and context."""
         try:
             now = datetime.now(timezone.utc)

@@ -11,7 +11,7 @@ from google.cloud.firestore import FieldFilter
 from data import UserProfile
 import logging
 
-FIREBASE_JSON_PATH = "skatit-ec470-firebase-adminsdk-fbsvc-1b6d547ba7.json"
+FIREBASE_JSON_PATH = os.environ.get("FIREBASE_JSON_PATH", "skatit-ec470-firebase-adminsdk-fbsvc-1b6d547ba7.json")
 
 class FirebaseManager:
     """Firebase manager with email-based user organization using Firestore."""
@@ -69,3 +69,30 @@ class FirebaseManager:
             name="Unknown"
         )
 
+
+    def get_all_user_emails(self) -> list[str]:
+                
+                if not self.db:
+                    logging.error("Cannot get user emails, Firestore is not initialized.")
+                    return []
+                
+                try:
+                    
+                    users_ref = self.db.collection('users')
+                    
+                    docs = users_ref.stream()
+                    
+                    
+                    email_list = [doc.id for doc in docs]
+                    
+                    logging.info(f"Found {len(email_list)} users to process.")
+                    return email_list
+                    
+                except Exception as e:
+                    logging.error(f"Failed to retrieve user emails: {e}")
+                    return []
+        
+        
+        
+#firebase_manager = FirebaseManager()
+#print(firebase_manager.get_all_user_emails())        

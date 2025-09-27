@@ -101,7 +101,7 @@ class HelperManager:
         name = user_profile.name
         
         # Get conversation context
-        recent_messages = message_manager.get_conversation(email, firebase_manager,limit=10)
+        recent_messages = message_manager.get_conversation(email, firebase_manager, date=None, limit=10)
         
         # Build conversation history for context
         conversation_context = ""

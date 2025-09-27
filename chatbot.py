@@ -8,7 +8,7 @@ from summary import SummaryManager
 from events import EventManager
 from crisis import CrisisManager
 from helper import HelperManager
-from daily import DailyTaskManager
+#from daily import DailyTaskManager
 import asyncio
 import concurrent.futures
 import logging
@@ -33,7 +33,7 @@ class MentalHealthChatbot:
         self.crisis_manager = CrisisManager(self.config)
         self.helper_manager = HelperManager(self.config)
         self.summary_manager = SummaryManager(self.config)
-        self.daily_task_manager = DailyTaskManager(self.config)
+        #self.daily_task_manager = DailyTaskManager(self.config)
         
         self.system_prompt = """You are MyBro - a caring, supportive friend who adapts your response style based on what the person needs. Your personality adjusts to match the situation:
 
@@ -124,7 +124,7 @@ class MentalHealthChatbot:
                 asyncio.to_thread(self.firebase_manager.get_user_profile, email),
                 asyncio.to_thread(self.health_filter.filter, message),
                 asyncio.to_thread(self.helper_manager.detect_emotion, message),
-                asyncio.to_thread(self.message_manager.get_conversation, email, None, 20)  # (email, date=None, limit=20)
+                asyncio.to_thread(self.message_manager.get_conversation, email,self.firebase_manager, None, 20)  # (email, date=None, limit=20)
             )
 
             emotion, urgency_level = emotion_urgency
