@@ -213,7 +213,7 @@ class MessageManager:
             
             user_profile = firebase_manager.get_user_profile(email)
             user_name = user_profile.name
-            last_message_time = self.get_last_conversation_time(email)
+            last_message_time = self.get_last_conversation_time(firebase_manager,email)
             
             if last_message_time:
                 try:
