@@ -2,70 +2,69 @@ from typing import List, Dict, Optional
 from datetime import datetime, timezone, date, timedelta
 from firebase_admin import firestore
 from data import ConversationMemory, MessagePair, UserProfile, UserMessage, LLMMessage
-from config import config
-from firebase_manager import firebase_manager
-from summary import summary_manager
 from datetime import timezone
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
-
+from google.cloud import firestore as fbs
+from google.cloud.firestore_v1 import Increment
+import logging
 
 class MessageManager:
     """Manages conversation memory, user profiles, and chat history using Firebase."""
     
-    def __init__(self):
+    def __init__(self,firebase_manager):
         self.conversations: Dict[str, ConversationMemory] = {}
         self.user_profiles: Dict[str, UserProfile] = {}
         self.db = firebase_manager.db
     
-    def add_chat_pair(self, email: str, user_message: str, model_response: str, emotion_detected: str = None, urgency_level: int = 1, suggestions: List[str] = None, follow_up_questions: List[str] = None):
+    def add_chat_pair(self, email: str, user_message: str, model_response: str, 
+                    emotion_detected: str = None, urgency_level: int = 1):
         """Add a chat pair (user + model response) to Firestore."""
         if not self.db:
+            logging.error(f"ERROR: Firestore DB not initialized.")
             return
         
         try:
+            logging.info(f"Adding chat pair for {email}")
             now = datetime.now()
             conversation_id = f"conv_{now.strftime('%Y%m%d')}"
             
             chat_pair_data = {
                 "user": user_message,
                 "model": model_response,
-                "timestamp": firestore.SERVER_TIMESTAMP,
-                "emotion_detected": emotion_detected,  
-                "urgency_level": urgency_level,      
-                "suggestions": suggestions or [],     
-                "follow_up_questions": follow_up_questions or [] 
+                "timestamp": fbs.SERVER_TIMESTAMP,
+                "urgency_level": urgency_level
             }
+            if emotion_detected is not None:
+                chat_pair_data["emotion_detected"] = emotion_detected
             
-            # Add chat pair to user's conversation subcollection
-            self.db.collection('users').document(email).collection('conversations').document(conversation_id).collection('chat').add(chat_pair_data)
-            
-            # Update conversation metadata
-            conv_doc_ref = self.db.collection('users').document(email).collection('conversations').document(conversation_id)
-            conv_doc = conv_doc_ref.get()
-            
-            if conv_doc.exists:
-                existing_metadata = conv_doc.to_dict()
-                pair_count = existing_metadata.get('MessagePairCount', 0) + 1
-                message_count = existing_metadata.get('messageCount', 0) + 2  
-            else:
-                pair_count = 1
-                message_count = 2 
-            
-            metadata = {
-                "startDate": now.strftime('%Y-%m-%d'),
-                "MessagePairCount": pair_count,
-                "messageCount": message_count,
-                "lastChatAt": firestore.SERVER_TIMESTAMP,
-                "lastMessageAt": firestore.SERVER_TIMESTAMP
-            }
-            
-            conv_doc_ref.set(metadata, merge=True)
-            
+            # Reference to today's conversation doc
+            conv_doc_ref = (
+                self.db.collection("users")
+                .document(email)
+                .collection("conversations")
+                .document(conversation_id)
+            )
+            logging.info(f"Conversation document ref: {conv_doc_ref.path}")
+
+            # Ensure conversation doc exists & update counters
+            conv_doc_ref.set({
+                "startDate": now.strftime("%Y-%m-%d"),
+                "chatPairCount": Increment(1),
+                "messageCount": Increment(2),   # user + model
+                "lastChatAt": fbs.SERVER_TIMESTAMP,
+                "lastMessageAt": fbs.SERVER_TIMESTAMP
+            }, merge=True)
+
+            # Add chat pair into subcollection
+            conv_doc_ref.collection("chat").add(chat_pair_data)
+
+            logging.info(f"SUCCESS: Added chat pair to {email}'s conversation")
+
         except Exception as e:
-            print(f"ERROR: Error adding chat pair: {e}")
+            logging.error(f"ERROR: Error adding chat pair: {e}")
     
-    def get_conversation(self, email: str, date: Optional[str] = None, limit: Optional[int] = None) -> List[MessagePair]:
+    def get_conversation(self, email: str, firebase_manager,date: Optional[str] = None, limit: Optional[int] = None) -> List[MessagePair]:
         """
         Get conversation messages for a specific date with optional limit.
         If no messages are available for the specified date (or today), falls back to the last conversation day.
@@ -148,16 +147,16 @@ class MessageManager:
                     message_pairs.append(message_pair)
                     
                 except Exception as e:
-                    print(f"Warning: Could not parse message pair: {e}")
+                    logging.warning(f"Could not parse message pair: {e}")
                     continue
             
             return message_pairs
             
         except Exception as e:
-            print(f"ERROR: Error getting conversation: {e}")
+            logging.error(f"Error getting conversation: {e}")
             return []
 
-    def get_last_conversation_time(self, email: str) -> Optional[datetime]:
+    def get_last_conversation_time(self, firebase_manager,email: str) -> Optional[datetime]:
         """Get the timestamp of the user's last message from any conversation date."""
         if not firebase_manager.db:
             return None
@@ -183,12 +182,12 @@ class MessageManager:
                                     latest_timestamp = timestamp
                                     
                     except Exception as conv_error:
-                        print(f"Warning: Error processing conversation {conv_id}: {conv_error}")
+                        logging.warning(f"Error processing conversation {conv_id}: {conv_error}")
                         continue
             return latest_timestamp
             
         except Exception as e:
-            print(f"ERROR: Error getting last conversation time: {e}")
+            logging.error(f"Error getting last conversation time: {e}")
             return None
     
     def _is_first_chat_of_day(self, email: str) -> bool:
@@ -196,17 +195,17 @@ class MessageManager:
         Returns True if this is the user's first chat of the day, False otherwise.
         """
         try:
-            today_str = datetime.now().strftime('Y%m%d')
+            today_str = datetime.now().strftime('%Y%m%d')
             conversation_id = f"conv_{today_str}"
             doc_ref = self.db.collection('users').document(email).collection('conversations').document(conversation_id)
             doc = doc_ref.get()
             # If the conversation document does not exist, it's the first chat of the day
             return not doc.exists
         except Exception as e:
-            print(f"ERROR: Error checking first chat of day: {e}")
+            logging.error(f"Error checking first chat of day: {e}")
             return False
 
-    def generate_notification_text(self, email: str) -> str:
+    def generate_notification_text(self, email: str, config, firebase_manager) -> str:
         """Generate a short, comforting notification text based on recent activity and context."""
         try:
             now = datetime.now(timezone.utc)
@@ -215,7 +214,7 @@ class MessageManager:
             
             user_profile = firebase_manager.get_user_profile(email)
             user_name = user_profile.name
-            last_message_time = self.get_last_conversation_time(email)
+            last_message_time = self.get_last_conversation_time(firebase_manager,email)
             
             if last_message_time:
                 try:
@@ -224,17 +223,14 @@ class MessageManager:
                     
                     hours_since_last = (now - last_message_time).total_seconds() / 3600
                     days_since_last = hours_since_last / 24
-                    
-                    # Don't send notification if too recent
-                    if hours_since_last < 6:  
-                        return ""
+                
                     
                     # Determine which conversation to use based on when the last message was
                     last_message_date = last_message_time.date()
                     last_message_date_str = last_message_date.strftime('%Y%m%d')
                     
                     # Get conversation from the actual date of last message
-                    recent_messages = self.get_conversation(email, last_message_date_str)
+                    recent_messages = self.get_conversation(email, firebase_manager,last_message_date_str)
                     
                     if recent_messages and len(recent_messages) > 0:
                         if hours_since_last < 24:
@@ -247,7 +243,7 @@ class MessageManager:
                         conversation_context = f"Hey {user_name}, Missing you. Are you feeling okay??"
                         
                 except Exception as tz_error:
-                    print(f"Timezone handling error: {tz_error}")
+                    logging.error(f"Timezone handling error: {tz_error}")
                     conversation_context = f"Hey {user_name}, Missing you. Are you feeling okay??"
             else:
                 # No messages found at all
@@ -314,9 +310,7 @@ class MessageManager:
             return notification_text
             
         except Exception as e:
-            print(f"ERROR: Error generating notification text: {e}")
+            logging.error(f"Error generating notification text: {e}")
             user_profile = firebase_manager.get_user_profile(email)
             user_name = user_profile.name 
             return f"Hey {user_name}, Missing you. Are you feeling okay??"
-
-message_manager = MessageManager()

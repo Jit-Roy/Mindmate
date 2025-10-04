@@ -10,6 +10,7 @@ user_profiles.json
 
 # Python
 __pycache__/
+_queuestorage_
 *.py[cod]
 *$py.class
 *.so
@@ -61,3 +62,8 @@ serviceAccountKey.json
 mybro-a1ea5-firebase-adminsdk-xxxx-xxxxxxxx.json
 *.json
 !host.json
+temp*
+
+skatit-ec470-firebase-adminsdk-fbsvc-1b6d547ba7.json
+
+.env.example

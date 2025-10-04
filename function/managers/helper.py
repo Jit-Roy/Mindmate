@@ -6,15 +6,13 @@ Contains utility functions for generating follow-up questions and suggestions
 from typing import List, Dict, Tuple
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import SystemMessage, HumanMessage
-from config import config
-from message import message_manager
-from firebase_manager import firebase_manager
+
 
 
 class HelperManager:
     """Manages helper functions for generating follow-up questions and suggestions."""
     
-    def __init__(self):
+    def __init__(self,config):
         """Initialize the HelperManager with LLM for response generation."""
         self.llm = ChatGoogleGenerativeAI(
             model=config.model_name,
@@ -85,7 +83,7 @@ class HelperManager:
         except Exception as e:
             return "neutral", 1
 
-    def generate_suggestions(self, emotion: str, urgency_level: int, email: str, user_message: str = "") -> List[str]:
+    def generate_suggestions(self, emotion: str, urgency_level: int, email: str, firebase_manager, message_manager, user_message: str = "") -> List[str]:
         """
         Generate practical suggestions based on user's emotional state and conversation context.
         
@@ -103,7 +101,7 @@ class HelperManager:
         name = user_profile.name
         
         # Get conversation context
-        recent_messages = message_manager.get_conversation(email, limit=10)
+        recent_messages = message_manager.get_conversation(email, firebase_manager, date=None, limit=10)
         
         # Build conversation history for context
         conversation_context = ""
@@ -186,5 +184,3 @@ class HelperManager:
             pass
         
         return suggestions
-
-helper_manager = HelperManager()

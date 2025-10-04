@@ -7,14 +7,13 @@ import json
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import SystemMessage, HumanMessage
 from data import LLMMessage
-from config import config
-from firebase_manager import firebase_manager
+
 
 
 class CrisisManager:
     """Manages crisis intervention and error handling responses."""
     
-    def __init__(self):
+    def __init__(self,config):
         """Initialize the CrisisManager with LLM for response generation."""
         self.llm = ChatGoogleGenerativeAI(
             model=config.model_name,
@@ -22,7 +21,7 @@ class CrisisManager:
             temperature=0.7 
         )
     
-    def handle_crisis_situation(self, user_email: str, message: str) -> LLMMessage:
+    def handle_crisis_situation(self, user_email: str, message: str,firebase_manager) -> LLMMessage:
         """Handle crisis situations with immediate support and resources using LLM."""
         user_profile = firebase_manager.get_user_profile(user_email)
         name = user_profile.name 
@@ -118,6 +117,9 @@ class CrisisManager:
                 raise Exception(f"JSON parsing failed: {json_error}")
             
         except Exception as e:
-            print(f"Error generating crisis response: {e}")
-
-crisis_manager = CrisisManager()
+            fallback_name = name if 'name' in locals() else "friend"
+            fallback_message = (
+                f"What's really on your heart right now, {fallback_name}? "
+                "How can I best support you today?"
+            )
+            return LLMMessage(content=fallback_message)
