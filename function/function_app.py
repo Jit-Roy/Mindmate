@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import asyncio
 from daily import run_daily_task_for_user
 
-from firebase_manager import FirebaseManager
+from managers.firebase_manager import FirebaseManager
 from daily import send_notification
 from daily import run_daily_task_for_user
 

@@ -1,16 +1,15 @@
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
-from message import MessageManager
+from managers.message import MessageManager
 from filter import MentalHealthFilter
 from config import Config
-from firebase_manager import FirebaseManager
-from summary import SummaryManager
-from events import EventManager
-from crisis import CrisisManager
-from helper import HelperManager
+from managers.firebase_manager import FirebaseManager
+from managers.summary import SummaryManager
+from managers.events import EventManager
+from managers.crisis import CrisisManager
+from managers.helper import HelperManager
 from firebase_writer import FirebaseWriter
 import asyncio
-import concurrent.futures
 import logging
 
 

@@ -1,9 +1,8 @@
 from datetime import date
 from config import Config
-from firebase_manager import FirebaseManager
-from events import EventManager
-from message import MessageManager
-from summary import SummaryManager
+from managers.firebase_manager import FirebaseManager
+from managers.message import MessageManager
+from managers.summary import SummaryManager
 import logging
 from typing import Union, Tuple
 
