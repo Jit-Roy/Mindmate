@@ -5,6 +5,8 @@ from data import ConversationMemory, MessagePair, UserProfile, UserMessage, LLMM
 from datetime import timezone
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
+from google.cloud import firestore as fbs
+from google.cloud.firestore_v1 import Increment
 import logging
 
 class MessageManager:
@@ -16,52 +18,52 @@ class MessageManager:
         self.user_profiles: Dict[str, UserProfile] = {}
         self.db = firebase_manager.db
     
-    def add_chat_pair(self, email: str, user_message: str, model_response: str, emotion_detected: str = None, urgency_level: int = 1, suggestions: List[str] = None, follow_up_questions: List[str] = None):
+    def add_chat_pair(self, email: str, user_message: str, model_response: str, 
+                    emotion_detected: str = None, urgency_level: int = 1):
         """Add a chat pair (user + model response) to Firestore."""
         if not self.db:
+            logging.error(f"ERROR: Firestore DB not initialized.")
             return
         
         try:
+            logging.info(f"Adding chat pair for {email}")
             now = datetime.now()
             conversation_id = f"conv_{now.strftime('%Y%m%d')}"
             
             chat_pair_data = {
                 "user": user_message,
                 "model": model_response,
-                "timestamp": firestore.SERVER_TIMESTAMP,
-                "emotion_detected": emotion_detected,  
-                "urgency_level": urgency_level,      
-                "suggestions": suggestions or [],     
-                "follow_up_questions": follow_up_questions or [] 
+                "timestamp": fbs.SERVER_TIMESTAMP,
+                "urgency_level": urgency_level
             }
+            if emotion_detected is not None:
+                chat_pair_data["emotion_detected"] = emotion_detected
             
-            # Add chat pair to user's conversation subcollection
-            self.db.collection('users').document(email).collection('conversations').document(conversation_id).collection('chat').add(chat_pair_data)
-            
-            # Update conversation metadata
-            conv_doc_ref = self.db.collection('users').document(email).collection('conversations').document(conversation_id)
-            conv_doc = conv_doc_ref.get()
-            
-            if conv_doc.exists:
-                existing_metadata = conv_doc.to_dict()
-                pair_count = existing_metadata.get('MessagePairCount', 0) + 1
-                message_count = existing_metadata.get('messageCount', 0) + 2  
-            else:
-                pair_count = 1
-                message_count = 2 
-            
-            metadata = {
-                "startDate": now.strftime('%Y-%m-%d'),
-                "MessagePairCount": pair_count,
-                "messageCount": message_count,
-                "lastChatAt": firestore.SERVER_TIMESTAMP,
-                "lastMessageAt": firestore.SERVER_TIMESTAMP
-            }
-            
-            conv_doc_ref.set(metadata, merge=True)
-            
+            # Reference to today's conversation doc
+            conv_doc_ref = (
+                self.db.collection("users")
+                .document(email)
+                .collection("conversations")
+                .document(conversation_id)
+            )
+            logging.info(f"Conversation document ref: {conv_doc_ref.path}")
+
+            # Ensure conversation doc exists & update counters
+            conv_doc_ref.set({
+                "startDate": now.strftime("%Y-%m-%d"),
+                "chatPairCount": Increment(1),
+                "messageCount": Increment(2),   # user + model
+                "lastChatAt": fbs.SERVER_TIMESTAMP,
+                "lastMessageAt": fbs.SERVER_TIMESTAMP
+            }, merge=True)
+
+            # Add chat pair into subcollection
+            conv_doc_ref.collection("chat").add(chat_pair_data)
+
+            logging.info(f"SUCCESS: Added chat pair to {email}'s conversation")
+
         except Exception as e:
-            logging.error(f"Error adding chat pair: {e}")
+            logging.error(f"ERROR: Error adding chat pair: {e}")
     
     def get_conversation(self, email: str, firebase_manager,date: Optional[str] = None, limit: Optional[int] = None) -> List[MessagePair]:
         """
@@ -194,7 +196,7 @@ class MessageManager:
         Returns True if this is the user's first chat of the day, False otherwise.
         """
         try:
-            today_str = datetime.now().strftime('Y%m%d')
+            today_str = datetime.now().strftime('%Y%m%d')
             conversation_id = f"conv_{today_str}"
             doc_ref = self.db.collection('users').document(email).collection('conversations').document(conversation_id)
             doc = doc_ref.get()

@@ -8,7 +8,7 @@ from summary import SummaryManager
 from events import EventManager
 from crisis import CrisisManager
 from helper import HelperManager
-#from daily import DailyTaskManager
+from firebase_writer import FirebaseWriter
 import asyncio
 import concurrent.futures
 import logging
@@ -18,7 +18,9 @@ class MentalHealthChatbot:
     """Main chatbot class that orchestrates the mental health conversation."""
     
     def __init__(self):
+        logging.info("Initializing MentalHealthChatbot...")
         self.firebase_manager = FirebaseManager()
+        self.writer = FirebaseWriter()
         self.config = Config()
         self.llm = ChatGoogleGenerativeAI(
             model=self.config.model_name,
@@ -27,7 +29,7 @@ class MentalHealthChatbot:
             max_tokens=self.config.max_tokens
         )
 
-        self.message_manager = MessageManager(self.firebase_manager)
+        self.message_manager = MessageManager(self.firebase_manager) 
         self.health_filter = MentalHealthFilter(self.config)
         self.event_manager = EventManager(self.config,self.firebase_manager)
         self.crisis_manager = CrisisManager(self.config)
@@ -133,7 +135,7 @@ class MentalHealthChatbot:
             # Early exit if not mental-health related
             if not topic_filter.is_mental_health_related:
                 redirect_response = "Sorry but i can not answer to that question!!!."
-                asyncio.create_task(asyncio.to_thread(
+                asyncio.create_task(self.writer.submit(
                     self.message_manager.add_chat_pair,
                     email, message, redirect_response, emotion, urgency_level
                 ))
@@ -148,7 +150,7 @@ class MentalHealthChatbot:
             if urgency_level >= 5:
                 crisis_response = self.crisis_manager.handle_crisis_situation(message, user_name)
                 # Persist conversation asynchronously
-                asyncio.create_task(asyncio.to_thread(
+                asyncio.create_task(self.writer.submit(
                     self.message_manager.add_chat_pair,
                     email, message, crisis_response.content, emotion, urgency_level
                 ))
@@ -157,7 +159,7 @@ class MentalHealthChatbot:
                     try:
                         evt = await event_future
                         if evt:
-                            await asyncio.to_thread(self.event_manager.add_event, email, evt)
+                            await self.writer.submit(self.event_manager.add_event, email, evt)
                     except Exception as bg_err:
                         logging.warning(f"Background event storage failed (crisis path): {bg_err}")
                 asyncio.create_task(_background_event_store())
@@ -166,7 +168,7 @@ class MentalHealthChatbot:
             # Non-crisis: wait for event extraction
             event = await event_future
             if event:
-                asyncio.create_task(asyncio.to_thread(self.event_manager.add_event, email, event))
+                asyncio.create_task(self.writer.submit(self.event_manager.add_event, email, event))
 
             # Generate LLM response (blocking -> offloaded)
             bot_message = await self._generate_response_async(
@@ -235,7 +237,7 @@ class MentalHealthChatbot:
             bot_message = response.content
 
             # Persist interaction (non-blocking for caller)
-            asyncio.create_task(asyncio.to_thread(
+            asyncio.create_task(self.writer.submit(
                 self.message_manager.add_chat_pair,
                 email, message, bot_message, emotion, urgency_level
             ))
@@ -250,52 +252,46 @@ class MentalHealthChatbot:
         return asyncio.run(self.process_conversation_async(email, message))
     
     def process_conversation_sync(self, email: str, message: str) -> str:
-        """Fallback synchronous conversation processing method."""
+        """Fallback synchronous conversation processing method with FirebaseWriter."""
         try:
-            # Get user profile and generate conversation summary
             user_profile = self.firebase_manager.get_user_profile(email)
+            logging.info(f"User profile retrieved: {user_profile}")
             user_name = user_profile.name
             
-            # Check if message is mental health related
             topic_filter = self.health_filter.filter(message)
             emotion, urgency_level = self.helper_manager.detect_emotion(message)
             
             if not topic_filter.is_mental_health_related:
                 redirect_response = "Sorry but i can not answer to that question!!!."
                 
-                self.message_manager.add_chat_pair(
-                    email=email,
-                    user_message=message,
-                    model_response=redirect_response,
-                    emotion_detected=emotion,
-                    urgency_level=urgency_level
-                )
-                
+
+                asyncio.run(self.writer.submit(
+                    self.message_manager.add_chat_pair,
+                    email, message, redirect_response, emotion, urgency_level
+                ))
                 return redirect_response
             
-            # Detect and store important events
             event = self.event_manager._extract_events_with_llm(message, email)
             if event:
-                self.event_manager.add_event(email, event)
+
+                asyncio.run(self.writer.submit(
+                    self.event_manager.add_event, email, event
+                ))
             
-            # Get conversation context
-            recent_messages = self.message_manager.get_conversation(email, self.firebase_manager,limit=20)
+            recent_messages = self.message_manager.get_conversation(email, self.firebase_manager, limit=20)
+            logging.info(f"Recent messages retrieved!")
             
-            # Handle crisis situations
             if urgency_level >= 5:
                 crisis_response = self.crisis_manager.handle_crisis_situation(message, user_name)
 
-                self.message_manager.add_chat_pair(
-                    email=email,
-                    user_message=message,
-                    model_response=crisis_response.content,
-                    emotion_detected=emotion,
-                    urgency_level=urgency_level
-                )
-                
+
+                asyncio.run(self.writer.submit(
+                    self.message_manager.add_chat_pair,
+                    email, message, crisis_response.content, emotion, urgency_level
+                ))
+
                 return crisis_response.content
             
-            # Build enhanced prompt
             enhanced_prompt = f"""
             {self.system_prompt}
             CONVERSATION CONTEXT:
@@ -305,55 +301,22 @@ class MentalHealthChatbot:
             - Detected emotion: {emotion}
             - Urgency level: {urgency_level}/5
             - User prefers to be called: {user_name}
-
-            🎯 RESPONSE GUIDANCE BASED ON URGENCY LEVEL:
-            Level 1-2 (Casual/Mild): Be supportive but relaxed. Don't overreact. Match their energy level.
-            Level 3 (Moderate): Show more concern and support. Ask deeper questions but stay calm.
-            Level 4-5 (Crisis): NOW use your passionate, protective mode. Fight for them!
-
-            🤗 CONVERSATION DEPTH GUIDANCE:
-            - First 1-2 exchanges: Keep it general, build rapport
-            - 3-5 exchanges: Start exploring their situation more
-            - 6+ exchanges with emotional content: NOW you can ask about sleep, food, family, relationships naturally
-
-            💡 FOLLOW-UP QUESTIONS GUIDANCE:
-            Based on the user's emotional state and urgency level, naturally include 1-2 thoughtful follow-up questions in your response that:
-            - Are appropriate for their current emotional state and urgency level
-            - Help them explore their feelings or situation deeper
-            - Show genuine care and interest in their wellbeing
-            - Match the conversation depth (don't ask personal questions too early)
-            - Are contextually relevant to what they've shared
-
-            Remember to:
-            1. Address them by their preferred name: {user_name}
-            2. Reference relevant past conversations
-            3. Match your tone to their ACTUAL emotional state
-            4. Only escalate intensity if urgency level is high
-            5. If there's a proactive greeting above, start with that
-            6. Include natural, caring follow-up questions within your response
             """
-            
-            # Build messages for LLM
+
             messages = [SystemMessage(content=enhanced_prompt)]
-            
-            # Convert MessagePair objects to proper message format
             if recent_messages:
-                for msg_pair in recent_messages:  
+                for msg_pair in recent_messages:
                     messages.append(HumanMessage(content=msg_pair.user_message.content))
                     messages.append(AIMessage(content=msg_pair.llm_message.content))
             
             messages.append(HumanMessage(content=message))
             response = self.llm.invoke(messages)
             bot_message = response.content
-            
-            # Save interaction
-            self.message_manager.add_chat_pair(
-                email=email,
-                user_message=message,
-                model_response=bot_message,
-                emotion_detected=emotion,
-                urgency_level=urgency_level
-            )
+
+            asyncio.run(self.writer.submit(
+                self.message_manager.add_chat_pair,
+                email, message, bot_message, emotion, urgency_level
+            ))
             
             return bot_message
             

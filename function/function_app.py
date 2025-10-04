@@ -22,6 +22,34 @@ CORS_HEADERS = {
 }
 
 
+# dummpy function to check if firebase is working
+@app.route(route="check_firebase", auth_level=func.AuthLevel.FUNCTION)
+def check_firebase(req: func.HttpRequest) -> func.HttpResponse:
+    logging.info('Check Firebase function processed a request.')
+
+    if req.method == "OPTIONS":
+        return func.HttpResponse("", status_code=204, headers=CORS_HEADERS)
+
+    try:
+        firebase_manager = FirebaseManager()
+        if firebase_manager.db:
+            return func.HttpResponse(
+                json.dumps({"status": "Firebase is initialized and working."}),
+                status_code=200, mimetype="application/json", headers=CORS_HEADERS
+            )
+        else:
+            return func.HttpResponse(
+                json.dumps({"error": "Firebase is not initialized."}),
+                status_code=500, mimetype="application/json", headers=CORS_HEADERS
+            )
+    except Exception as e:
+        logging.error(f"An error occurred in check_firebase: {e}", exc_info=True)
+        return func.HttpResponse(
+            json.dumps({"error": "An internal server error occurred."}),
+            status_code=500, mimetype="application/json", headers=CORS_HEADERS
+        )
+
+
 @app.route(route="chat", auth_level=func.AuthLevel.FUNCTION)
 def chat_handler(req: func.HttpRequest) -> func.HttpResponse:
     """

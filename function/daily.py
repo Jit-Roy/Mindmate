@@ -10,7 +10,6 @@ from typing import Union, Tuple
 
 def run_daily_task_for_user(email: str) -> None:
     
-    
     try:
         config = Config()
         firebase_manager = FirebaseManager()
