@@ -8,7 +8,7 @@ import firebase_admin
 from firebase_admin import firestore
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import SystemMessage, HumanMessage
-from data import MessagePair, UserMessage, LLMMessage, ConversationMemory
+from data import MessagePair
 import logging
 
 

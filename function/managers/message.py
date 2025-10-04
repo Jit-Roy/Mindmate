@@ -13,7 +13,6 @@ class MessageManager:
     """Manages conversation memory, user profiles, and chat history using Firebase."""
     
     def __init__(self,firebase_manager):
-        #self.config = config
         self.conversations: Dict[str, ConversationMemory] = {}
         self.user_profiles: Dict[str, UserProfile] = {}
         self.db = firebase_manager.db

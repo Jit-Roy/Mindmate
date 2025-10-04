@@ -127,3 +127,11 @@ class FirebaseManager:
                 'timezone': default_profile.timezone
             })
             return default_profile
+    
+    def get_all_user_emails(self) -> list:
+        """Retrieve all user emails from Firestore."""
+        if not self.db:
+            raise RuntimeError("Firebase DB not initialized")
+        users_ref = self.db.collection('users')
+        docs = users_ref.stream()
+        return [doc.id for doc in docs]
