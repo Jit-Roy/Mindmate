@@ -33,7 +33,7 @@ class MentalHealthChatbot:
         self.event_manager = EventManager(self.config,self.firebase_manager)
         self.crisis_manager = CrisisManager(self.config)
         self.helper_manager = HelperManager(self.config)
-        self.summary_manager = SummaryManager(self.config)
+        self.summary_manager = SummaryManager(self.config,self.firebase_manager.db)
         #self.daily_task_manager = DailyTaskManager(self.config)
         
         self.system_prompt = """You are MyBro - a caring, supportive friend who adapts your response style based on what the person needs. Your personality adjusts to match the situation:

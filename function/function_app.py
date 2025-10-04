@@ -3,11 +3,9 @@ import logging
 import json
 from datetime import datetime, timezone
 import asyncio
-from daily import run_daily_task_for_user
+from daily import run_daily_task_for_user,send_notification
 
 from managers.firebase_manager import FirebaseManager
-from daily import send_notification
-from daily import run_daily_task_for_user
 
 from main import android_chat
 

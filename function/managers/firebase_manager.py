@@ -128,5 +128,3 @@ class FirebaseManager:
                 'timezone': default_profile.timezone
             })
             return default_profile
-
-# firebase_manager = FirebaseManager()
