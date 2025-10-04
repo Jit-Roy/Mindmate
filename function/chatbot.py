@@ -147,7 +147,7 @@ class MentalHealthChatbot:
 
             # Crisis handling short-circuits normal flow
             if urgency_level >= 5:
-                crisis_response = self.crisis_manager.handle_crisis_situation(message, user_name,self.firebase_manager)
+                crisis_response = self.crisis_manager.handle_crisis_situation(email,message,self.firebase_manager)
                 # Persist conversation asynchronously
                 asyncio.create_task(self.writer.submit(
                     self.message_manager.add_chat_pair,
@@ -281,7 +281,7 @@ class MentalHealthChatbot:
             logging.info(f"Recent messages retrieved!")
             
             if urgency_level >= 5:
-                crisis_response = self.crisis_manager.handle_crisis_situation(message, user_name)
+                crisis_response = self.crisis_manager.handle_crisis_situation(email, message, self.firebase_manager)
 
 
                 asyncio.run(self.writer.submit(

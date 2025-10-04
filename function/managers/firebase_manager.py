@@ -7,6 +7,7 @@ import os
 import json
 import base64
 import firebase_admin
+import logging
 from firebase_admin import credentials, firestore
 from google.cloud.firestore import FieldFilter
 from data import UserProfile
@@ -22,18 +23,16 @@ class FirebaseManager:
         """Initialize Firebase using multiple credential strategies suitable for Azure Functions."""
         try:
             if not firebase_admin._apps:
-                if (
-                    self._use_credentials_from_base64_env()
-                ):
-                    print("SUCCESS: Firebase initialized!")
+                if self._use_credentials_from_base64_env():
+                    logging.info("Firebase initialized!")
                 elif self._use_service_account_file():
-                    print("SUCCESS: Firebase initialized!")
+                    logging.info("Firebase initialized!")
                 else:
                     raise Exception("No valid Firebase credentials found (env/ADC/file)")
             
             self.db = firestore.client()
         except Exception as e:
-            print(f"ERROR: Firebase initialization failed: {e}")
+            logging.error(f"Firebase initialization failed: {e}")
             self.db = None
     
     def _use_credentials_from_json_env(self) -> bool:
@@ -45,10 +44,10 @@ class FirebaseManager:
             cred_dict = json.loads(json_str)
             cred = credentials.Certificate(cred_dict)
             firebase_admin.initialize_app(cred, self._optional_project_settings())
-            print("INFO: Firebase initialized from FIREBASE_CREDENTIALS_JSON")
+            logging.info("Firebase initialized from FIREBASE_CREDENTIALS_JSON")
             return True
         except Exception as e:
-            print(f"INFO: JSON env credentials not used: {e}")
+            logging.debug(f"JSON env credentials not used: {e}")
             return False
 
     def _use_credentials_from_base64_env(self) -> bool:
@@ -61,10 +60,10 @@ class FirebaseManager:
             cred_dict = json.loads(json_str)
             cred = credentials.Certificate(cred_dict)
             firebase_admin.initialize_app(cred, self._optional_project_settings())
-            print("INFO: Firebase initialized from FIREBASE_CREDENTIALS_BASE64")
+            logging.info("Firebase initialized from FIREBASE_CREDENTIALS_BASE64")
             return True
         except Exception as e:
-            print(f"INFO: Base64 env credentials not used: {e}")
+            logging.debug(f"Base64 env credentials not used: {e}")
             return False
 
     def _use_application_default(self) -> bool:
@@ -72,10 +71,10 @@ class FirebaseManager:
         try:
             cred = credentials.ApplicationDefault()
             firebase_admin.initialize_app(cred, self._optional_project_settings())
-            print("INFO: Firebase initialized using Application Default Credentials")
+            logging.info("Firebase initialized using Application Default Credentials")
             return True
         except Exception as e:
-            print(f"INFO: Application Default Credentials not used: {e}")
+            logging.debug(f"Application Default Credentials not used: {e}")
             return False
 
     def _use_service_account_file(self) -> bool:
@@ -88,14 +87,14 @@ class FirebaseManager:
             module_dir = os.path.dirname(os.path.abspath(__file__))
             cred_path = os.path.join(module_dir, filename)
             if not os.path.exists(cred_path):
-                print(f"INFO: Service account file not found at {cred_path}")
+                logging.warning(f"Service account file not found at {cred_path}")
                 return False
             cred = credentials.Certificate(cred_path)
             firebase_admin.initialize_app(cred, self._optional_project_settings())
-            print(f"INFO: Firebase initialized from file: {cred_path}")
+            logging.info(f"Firebase initialized from file: {cred_path}")
             return True
         except Exception as e:
-            print(f"INFO: Service account file failed: {e}")
+            logging.error(f"Service account file failed: {e}")
             return False
 
     def _optional_project_settings(self) -> dict:
