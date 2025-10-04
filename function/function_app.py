@@ -22,7 +22,7 @@ CORS_HEADERS = {
 }
 
 
-# dummpy function to check if firebase is working
+# dummy function to check if firebase is working
 @app.route(route="check_firebase", auth_level=func.AuthLevel.FUNCTION)
 def check_firebase(req: func.HttpRequest) -> func.HttpResponse:
     logging.info('Check Firebase function processed a request.')
@@ -103,7 +103,7 @@ def chat_handler(req: func.HttpRequest) -> func.HttpResponse:
         
         
 @app.route(route="notification", auth_level=func.AuthLevel.FUNCTION)
-def notification_handeler(req: func.HttpRequest) -> func.HttpResponse:
+def notification_handler(req: func.HttpRequest) -> func.HttpResponse:
     
     logging.info('Notification HTTP handler received a request.')
 

@@ -16,7 +16,7 @@ def run_daily_task_for_user(email: str) -> None:
         summary_manager = SummaryManager(config, firebase_manager.db)
     except Exception as e:
         logging.error(f"Error initializing components for {email}: {e}", exc_info=True)
-        return "Error: Could not initialize components.", "Error: Initialization failed."
+        return 
 
     try:
         
